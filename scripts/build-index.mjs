@@ -6,6 +6,7 @@
 //   node scripts/build-index.mjs --repo https://github.com/me/x   # 指定仓库地址
 //   node scripts/build-index.mjs --commit <40位sha>               # 指定提交
 //   node scripts/build-index.mjs --out publish/index.json
+//   node scripts/build-index.mjs --publish                        # 写文件 + 只提交 publish/index.json
 //
 // 输出是一份自包含的 JSON：icon 内联成 data: URL（≤32 KiB），
 // 版本来源用 git + 固定提交（插件市场据此生成 git+https 安装串）。
@@ -77,8 +78,8 @@ const index = {
       name: pkg.name,
       title: { zh: '桌面提醒', en: 'Desktop reminder' },
       description: {
-        zh: '把「Harness完成提醒客户端」的完成 / 决定提醒变成 notify_user 工具：浮动弹窗 + 提示音，不抢焦点。仅 Windows。',
-        en: 'Turns the Harness reminder client into a notify_user tool: floating popup with sound, never steals focus. Windows only.',
+        zh: '把完成 / 决定提醒变成 notify_user 工具：浮动卡片 + 提示音，不抢焦点。卡片由插件自带的 PowerShell 脚本绘制，仓库零 exe。仅 Windows。',
+        en: 'Turns completion / decision reminders into a notify_user tool: floating card with sound, never steals focus. The card is drawn by the bundled PowerShell host, so the package ships no exe. Windows only.',
       },
       ...icon === undefined ? {} : { icon },
       author: flag('author') ?? pkg.name,
@@ -108,3 +109,31 @@ console.log(`  插件   ${pkg.name}@${pkg.version}`)
 console.log(`  仓库   ${repoUrl}`)
 console.log(`  提交   ${commit}`)
 console.log(`  时间   ${new Date(publishTimestamp * 1000).toISOString()}`)
+
+// --publish：只把这份索引提交进仓库（paths 限定，不会顺手带走别的改动）。
+if (argv.includes('--publish')) {
+  const rel = path.relative(ROOT, outPath).split(path.sep).join('/')
+  execFileSync('git', ['add', '--', rel], { cwd: ROOT, stdio: 'inherit' })
+  let dirty = true
+  try {
+    execFileSync('git', ['diff', '--cached', '--quiet', '--', rel], { cwd: ROOT })
+    dirty = false
+  } catch {
+    dirty = true
+  }
+  if (!dirty) {
+    console.log(`已提交：${rel} 没有变化，跳过 commit`)
+  } else {
+    execFileSync('git', ['commit', '-m', `索引：${pkg.name}@${pkg.version}（${commit.slice(0, 7)}）`, '--', rel], {
+      cwd: ROOT,
+      stdio: 'inherit',
+    })
+    console.log(`已提交：${rel}`)
+  }
+  try {
+    execFileSync('git', ['config', '--get', 'remote.origin.url'], { cwd: ROOT, stdio: 'pipe' })
+    console.log('下一步：git push')
+  } catch {
+    console.log('还没有 remote：先 git remote add origin <仓库 https 地址> 再 push')
+  }
+}
