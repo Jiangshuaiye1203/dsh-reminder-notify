@@ -1,0 +1,63 @@
+{
+  "format": 1,
+  "title": {
+    "zh": "本地自建插件源",
+    "en": "Private plugin source"
+  },
+  "description": {
+    "zh": "个人维护的 DSH 插件，安装前请自行查看来源。",
+    "en": "Self-hosted DSH plugins. Check the source before installing."
+  },
+  "metadata": {
+    "categories": {
+      "productivity": {
+        "title": {
+          "zh": "效率工具",
+          "en": "Productivity"
+        }
+      }
+    }
+  },
+  "plugins": [
+    {
+      "name": "dsh-reminder-notify",
+      "title": {
+        "zh": "桌面提醒",
+        "en": "Desktop reminder"
+      },
+      "description": {
+        "zh": "把完成 / 决定提醒变成 notify_user 工具：浮动卡片 + 提示音，不抢焦点。卡片由插件自带的 PowerShell 脚本绘制，仓库零 exe。仅 Windows。",
+        "en": "Turns completion / decision reminders into a notify_user tool: floating card with sound, never steals focus. The card is drawn by the bundled PowerShell host, so the package ships no exe. Windows only."
+      },
+      "icon": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI2NCIgaGVpZ2h0PSI2NCIgdmlld0JveD0iMCAwIDY0IDY0IiByb2xlPSJpbWciIGFyaWEtbGFiZWw9IkRlc2t0b3AgcmVtaW5kZXIiPgogIDxkZWZzPgogICAgPGxpbmVhckdyYWRpZW50IGlkPSJnIiB4MT0iMCIgeTE9IjAiIHgyPSIxIiB5Mj0iMSI+CiAgICAgIDxzdG9wIG9mZnNldD0iMCIgc3RvcC1jb2xvcj0iIzJmNmZlZCIvPgogICAgICA8c3RvcCBvZmZzZXQ9IjEiIHN0b3AtY29sb3I9IiMxYjNmOWUiLz4KICAgIDwvbGluZWFyR3JhZGllbnQ+CiAgPC9kZWZzPgogIDxyZWN0IHg9IjIiIHk9IjIiIHdpZHRoPSI2MCIgaGVpZ2h0PSI2MCIgcng9IjE0IiBmaWxsPSJ1cmwoI2cpIi8+CiAgPHBhdGggZD0iTTMyIDE0Yy02LjEgMC0xMC41IDQuNi0xMC41IDEwLjd2Ni4xYzAgMi40LS45IDQuMy0yLjQgNi4xLTEuMiAxLjUtLjMgMy42IDEuNyAzLjZoMjIuNGMyIDAgMi45LTIuMSAxLjctMy42LTEuNS0xLjgtMi40LTMuNy0yLjQtNi4xdi02LjFDNDIuNSAxOC42IDM4LjEgMTQgMzIgMTR6IiBmaWxsPSIjZmZmIi8+CiAgPHBhdGggZD0iTTI3IDQ1LjVhNSA1IDAgMCAwIDEwIDB6IiBmaWxsPSIjZmZkNDVlIi8+CiAgPGNpcmNsZSBjeD0iNDYiIGN5PSIxOCIgcj0iNyIgZmlsbD0iI2ZmZDQ1ZSIvPgogIDxwYXRoIGQ9Ik00Mi42IDE4LjFsMi40IDIuNCA0LjItNC40IiBmaWxsPSJub25lIiBzdHJva2U9IiMxYjNmOWUiIHN0cm9rZS13aWR0aD0iMi4yIiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiLz4KPC9zdmc+Cg==",
+      "author": "dsh-reminder-notify",
+      "repository": {
+        "url": "https://github.com/Jiangshuaiye1203/dsh-reminder-notify"
+      },
+      "metadata": {
+        "category": "productivity",
+        "keywords": [
+          "dsh",
+          "dsh-plugin",
+          "deepseek-harness",
+          "notify",
+          "reminder",
+          "toast"
+        ],
+        "labels": []
+      },
+      "versions": [
+        {
+          "version": "0.2.0",
+          "publishTimestamp": 1795010917,
+          "source": {
+            "type": "git",
+            "url": "https://github.com/Jiangshuaiye1203/dsh-reminder-notify",
+            "commit": "923cfe625fc737e1b39ba3cfc382061100a67e02"
+          },
+          "engines": {}
+        }
+      ]
+    }
+  ]
+}
