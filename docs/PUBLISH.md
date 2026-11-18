@@ -4,6 +4,18 @@ DSH 的「插件市场 → 发现」页读的是**索引 URL**：一份 JSON（�
 索引本身不托管代码，只给出版本从哪儿装（`git` 仓库 + 固定提交，或 npm 包名）。
 本目录的 `index.json` 由 `scripts/build-index.mjs` 生成，**不要手改**。
 
+## 已发布状态（2026-11-18）
+
+| 项目 | 值 |
+| --- | --- |
+| 公开仓库 | https://github.com/Jiangshuaiye1203/dsh-reminder-notify |
+| 索引地址（他人添加这个） | `https://jiangshuaiye1203.github.io/dsh-reminder-notify/publish/index.json` |
+| 站点首页 | https://jiangshuaiye1203.github.io/dsh-reminder-notify/ |
+| 当前版本 | 0.2.0，装源固定提交 `923cfe625fc737e1b39ba3cfc382061100a67e02` |
+| Pages | Deploy from a branch，`main` / `(root)` |
+
+发新版只需要：改代码 → 提交 → push → `node scripts/build-index.mjs --publish` → push。
+
 ## 0. 结构
 
 ```
