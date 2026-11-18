@@ -1,0 +1,47 @@
+# ============================================================================
+# dsh-reminder-notify —— DSH bundle patch
+# ============================================================================
+# 插件挂载声明：DSH 启动时按 bundle 层栈叠加各插件 patch，把本插件的 row
+# 插入 profile 的配置树。row id 与包名同名，便于在插件页找到它。
+#
+# 安装（不需要手工改 profile 的 patch）：
+#   dsh plugin --profile desktop add link:<本目录绝对路径>
+# 或直接用 DSH 的 plugin_manager install_bundle target=<本目录绝对路径>。
+#
+# config 里的每一项都可以在插件页 / cordis.patch.yml 里改；这里给的是默认值。
+# ============================================================================
+
+- insert:
+    - id: dsh-reminder-notify
+      name: dsh-reminder-notify
+      config:
+        # 宿主模式：
+        #   script（默认）= 包内 host/ReminderHost.ps1，用系统自带 PowerShell + WinForms
+        #                   在运行期编译绘制，仓库里没有 exe，不会被 SmartScreen 拦。
+        #   exe          = 老的 Harness完成提醒.exe，只给已装客户端的机器留的兼容开关。
+        hostMode: script
+        # 脚本宿主路径；留空 = 包内 host/ReminderHost.ps1
+        scriptPath: ''
+        # 调 PowerShell 用的可执行文件，一般不用改
+        powershellPath: powershell.exe
+        # exe 模式下生效：空的 clientDir = 用包内 assets/；填绝对路径则用外部客户端目录
+        clientDir: ''
+        # 提示音目录；留空 = 包内 assets/提示音导入/
+        audioDir: ''
+        # 弹窗停留秒数（2–600）
+        seconds: 60
+        # 弹窗位置：br = 右下角（默认）、center = 居中、tr = 右上角
+        position: br
+        # 是否播放提示音；工具调用时传 sound:false 可以只弹窗不出声
+        sound: true
+        # 提示音文件名，在 audioDir 下解析
+        doneAudio: 完成提醒语音.wav
+        decideAudio: 需要你来决定.wav
+        # raw 档位的默认音频；留空 = 静音
+        rawAudio: ''
+        # 卡片左侧强调色（#RRGGBB）
+        accentDone: '#2ECC71'
+        accentDecide: '#F5A623'
+        accentRaw: '#4C8DFF'
+        # 同档位提醒的最小间隔（毫秒），防止模型在同一轮重复调用
+        cooldownMs: 1500
