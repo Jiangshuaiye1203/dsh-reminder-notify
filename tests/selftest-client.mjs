@@ -13,6 +13,7 @@ const source = fs.readFileSync(path.join(here, '..', 'client.js'), 'utf8')
 // ---- 极简 React 桩：只实现 createElement / useState ----
 function createReactStub() {
   let hooks = []
+  const effects = []
   let cursor = 0
   let rerender = null
   const stub = {
@@ -32,14 +33,21 @@ function createReactStub() {
       }
       return [hooks[index], set]
     },
-    useEffect() {},
+    useEffect(fn) {
+      effects.push(fn)
+    },
   }
   return {
     stub,
     begin() {
       cursor = 0
     },
+    runEffects() {
+      const pending = effects.splice(0, effects.length)
+      for (const fn of pending) fn()
+    },
     reset() {
+      effects.length = 0
       hooks = []
       cursor = 0
       rerender = null
@@ -161,7 +169,72 @@ try {
   assert.deepEqual(saved[0].ops, [{ op: 'set', path: ['seconds'], value: 90 }], 'ops 不对：' + JSON.stringify(saved[0].ops))
   assert.equal(saved[0].revision, 7, 'revision 应该原样传回宿主')
 
-  // ---- 3. 只读时不能保存 ----
+  // ---- 3. 目录选择按钮：点「浏览…」把宿主选中的目录填进字段 ----
+  react.reset()
+  const pickCalls = []
+  const pickProps = {
+    t,
+    pickDirectory: () => {
+      pickCalls.push(1)
+      return Promise.resolve('D:\\我的提示音')
+    },
+  }
+  const pickForm = {
+    state: { value: { seconds: 60, position: 'br', sound: true, audioDir: '', clientDir: '' }, revision: 11, writable: true, status: 'ready' },
+    mutate() {
+      throw new Error('选择目录后还没点保存，不应该调用 mutate')
+    },
+  }
+  react.begin()
+  let pickTree = panel(Object.assign({ view: 'page', form: pickForm }, pickProps))
+  const browseButton = findAll(pickTree, (node) => node.type === 'button' && /drn-btn small/.test(node.props.className || ''))[0]
+  assert.ok(browseButton, '目录字段旁边应该有「浏览…」按钮')
+  browseButton.props.onClick()
+  await new Promise((resolve) => setTimeout(resolve, 20))
+  assert.equal(pickCalls.length, 1, '点浏览应该调用一次 pickDirectory')
+  react.begin()
+  pickTree = panel(Object.assign({ view: 'page', form: pickForm }, pickProps))
+  const pickedInput = findAll(pickTree, (node) => node.type === 'input' && node.props.value === 'D:\\我的提示音')[0]
+  assert.ok(pickedInput, '选中的目录没有填进输入框')
+  console.log('picker ok')
+
+  // ---- 4. 音频目录扫描：Host 路由返回清单后，提示音字段旁出现下拉 ----
+  react.reset()
+  const realFetch = globalThis.fetch
+  globalThis.fetch = async (url) => {
+    assert.match(String(url), /^\/dsh-reminder-notify\/audio/, '应该请求 Host 的音频索引路由：' + url)
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({ dir: 'D:\\提示音', files: ['完成提醒语音.wav', '需要你来决定.mp3'] }),
+    }
+  }
+  try {
+    const audioForm = {
+      state: { value: { seconds: 60, position: 'br', sound: true, doneAudio: '', audioDir: 'D:\\提示音' }, revision: 3, writable: true, status: 'ready' },
+      mutate() {
+        throw new Error('只是选择文件，还没点保存，不应该调用 mutate')
+      },
+    }
+    react.begin()
+    panel({ view: 'page', form: audioForm, t })
+    react.runEffects()
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    react.begin()
+    const audioTree = panel({ view: 'page', form: audioForm, t })
+    const selects = findAll(audioTree, (node) => node.type === 'select' && node.props.className === 'drn-select')
+    const audioSelects = selects.filter((node) =>
+      findAll(node, (child) => child.type === 'option' && child.props.value === '完成提醒语音.wav').length === 1,
+    )
+    assert.equal(audioSelects.length, 3, '三个提示音字段都应该有下拉，实际 ' + audioSelects.length)
+    const options = findAll(audioSelects[0], (node) => node.type === 'option').map((node) => node.props.value)
+    assert.deepEqual(options, ['', '完成提醒语音.wav', '需要你来决定.mp3'], '下拉选项不对：' + JSON.stringify(options))
+    console.log('audio-select ok')
+  } finally {
+    globalThis.fetch = realFetch
+  }
+
+  // ---- 5. 只读时不能保存 ----
   react.reset()
   currentValue = Object.assign({}, currentValue)
   const readonlyForm = {
