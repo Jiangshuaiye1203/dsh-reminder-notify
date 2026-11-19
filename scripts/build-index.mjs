@@ -6,10 +6,13 @@
 //   node scripts/build-index.mjs --repo https://github.com/me/x   # 指定仓库地址
 //   node scripts/build-index.mjs --commit <40位sha>               # 指定提交
 //   node scripts/build-index.mjs --out publish/index.json
+//   node scripts/build-index.mjs --npm                      # 版本来源改成 npm 包（默认 registry）
+//   node scripts/build-index.mjs --npm --registry https://registry.npmmirror.com
 //   node scripts/build-index.mjs --publish                        # 写文件 + 只提交 publish/index.json
 //
-// 输出是一份自包含的 JSON：icon 内联成 data: URL（≤32 KiB），
-// 版本来源用 git + 固定提交（插件市场据此生成 git+https 安装串）。
+// 输出是一份自包含的 JSON：icon 内联成 data: URL（≤32 KiB）。
+// 默认版本来源用 git + 固定提交（插件市场据此生成 git+https 安装串）；
+// 加 --npm 则用 npm 包名，装源变成 `pnpm add <name>@<version>`，不依赖 github.com。
 import { execFileSync } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -52,6 +55,16 @@ const repoUrl = (() => {
 const commit = (flag('commit') ?? git('rev-parse', 'HEAD')).toLowerCase()
 if (!/^[0-9a-f]{40}$/u.test(commit)) throw new Error(`提交必须是 40 位小写 sha：${commit}`)
 
+// --npm：版本来源改成 npm 包（http(s) 注册表；不传 registry 就让安装方用自己配置的源）。
+const useNpm = argv.includes('--npm')
+const registry = flag('registry')
+if (registry !== undefined && !/^https?:\/\//u.test(registry)) {
+  throw new Error(`registry 必须是 http(s) 地址：${registry}`)
+}
+const versionSource = useNpm
+  ? { type: 'npm', ...(registry === undefined ? {} : { registry }) }
+  : { type: 'git', url: repoUrl, commit }
+
 const publishTimestamp = Number(flag('time') ?? git('log', '-1', '--format=%ct', commit))
 const iconPath = path.join(ROOT, 'icon.svg')
 const icon = fs.existsSync(iconPath)
@@ -93,7 +106,7 @@ const index = {
         {
           version: pkg.version,
           publishTimestamp,
-          source: { type: 'git', url: repoUrl, commit },
+          source: versionSource,
           engines: pkg.engines?.dsh === undefined ? {} : { dsh: pkg.engines.dsh },
         },
       ],
@@ -108,6 +121,7 @@ console.log(`已写入 ${outPath}`)
 console.log(`  插件   ${pkg.name}@${pkg.version}`)
 console.log(`  仓库   ${repoUrl}`)
 console.log(`  提交   ${commit}`)
+console.log(`  来源   ${useNpm ? `npm（${registry ?? '使用安装方配置的 registry'}）` : 'git'}`)
 console.log(`  时间   ${new Date(publishTimestamp * 1000).toISOString()}`)
 
 // --publish：只把这份索引提交进仓库（paths 限定，不会顺手带走别的改动）。
