@@ -17,6 +17,33 @@ import { fileURLToPath } from 'node:url'
 export const name = 'dsh-reminder-notify'
 export const inject = ['tools']
 
+// schemastery 由 dsh 安装自带（profile 的 node_modules 里就有），所以包里不声明依赖。
+// 用动态 import 兜底：万一在纯裸仓库里跑（没有 dsh 的依赖树），插件本体仍可工作，
+// 只是插件页没有 schema 表单 —— 不要让一个 UI 依赖把提醒功能整个弄挂。
+const z = await import('@deepseek-ai/schemastery')
+  .then((mod) => mod.default ?? mod)
+  .catch(() => null)
+
+// 插件页的设置表单由这份 schema 渲染（client.js 再在上面做分组面板）。
+// 每一项的默认值与 settingsOf() 里的兜底一致：空字符串表示「用包内资源」。
+export const Config = z === null ? undefined : z.object({
+  hostMode: z.union(['script', 'exe']).default('script').description('宿主模式：script = 包内 PowerShell 脚本（默认），exe = 老的客户端 exe'),
+  scriptPath: z.string().default('').description('脚本宿主路径，留空 = 包内 host/ReminderHost.ps1'),
+  powershellPath: z.string().default('powershell.exe').description('调 PowerShell 用的可执行文件'),
+  clientDir: z.string().default('').description('exe 模式下的客户端目录，留空 = 包内 assets/'),
+  audioDir: z.string().default('').description('提示音目录，留空 = 包内 assets/提示音导入/'),
+  seconds: z.number().min(2).max(600).step(1).default(60).description('弹窗停留秒数（2–600）'),
+  position: z.union(['br', 'center', 'tr']).default('br').description('弹窗位置：br 右下、center 居中、tr 右上'),
+  sound: z.boolean().default(true).description('是否播放提示音'),
+  doneAudio: z.string().default('完成提醒语音.wav').description('done 档位的提示音文件名（在提示音目录下）'),
+  decideAudio: z.string().default('需要你来决定.wav').description('decide 档位的提示音文件名'),
+  rawAudio: z.string().default('').description('raw 档位的提示音文件名，留空 = 静音'),
+  accentDone: z.string().default('#2ECC71').description('done 档位卡片强调色（#RRGGBB）'),
+  accentDecide: z.string().default('#F5A623').description('decide 档位卡片强调色'),
+  accentRaw: z.string().default('#4C8DFF').description('raw 档位卡片强调色'),
+  cooldownMs: z.number().min(0).step(100).default(1500).description('同档位提醒的最小间隔（毫秒）'),
+})
+
 const PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)))
 const BUNDLED_HOST_SCRIPT = path.join(PACKAGE_ROOT, 'host', 'ReminderHost.ps1')
 const BUNDLED_CLIENT_DIR = path.join(PACKAGE_ROOT, 'assets')
