@@ -2,6 +2,6 @@
   "meta": {
     "title": "Desktop reminder",
     "description": "Pop a floating reminder with voice when work is done or a decision is needed.",
-    "detail": "Registers the notify_user tool, which pops a bottom-right reminder card with the matching voice — never stealing focus, auto-dismissing after N seconds. The card is drawn by host/ReminderHost.ps1 with the system PowerShell + WinForms at run time, so the package ships no exe and is not blocked by SmartScreen or antivirus. Duration, position, sounds, accent colours and the cooldown live in the plugin Config; hostMode=exe still points at the original client folder on older machines."
+    "detail": "docs/detail.en.md"
   }
 }

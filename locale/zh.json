@@ -2,6 +2,6 @@
   "meta": {
     "title": "桌面提醒",
     "description": "工作收尾和需要你拍板时，弹出浮动提醒并播放语音。",
-    "detail": "把「桌面提醒」包成插件：注册 notify_user 工具，模型在任务收尾（kind=done）或征求同意之前（kind=decide）调用它，右下角弹出提醒卡片并播放对应语音，不抢焦点、按秒自动关闭。卡片宿主是包内的 host/ReminderHost.ps1——用系统自带的 PowerShell + WinForms 在运行期绘制，仓库里没有任何 exe，下载安装不会被 SmartScreen / 杀软拦。停留秒数、位置、提示音、强调色、冷却间隔都在插件 Config 里改；老机器仍可用 hostMode=exe 指向原来的客户端目录。"
+    "detail": "docs/detail.zh.md"
   }
 }
