@@ -1,7 +1,8 @@
 {
   "name": "dsh-reminder-notify",
-  "version": "0.2.0",
+  "version": "0.2.2",
   "description": "DSH 桌面提醒插件：把「完成/需要决定」提醒变成 notify_user 工具（浮动卡片 + 提示音，不抢焦点，纯 PowerShell 源码宿主，仓库零 exe）",
+  "author": "Jiangshuaiye1203",
   "type": "module",
   "main": "index.js",
   "exports": {
@@ -20,7 +21,8 @@
     "scripts",
     "icon.svg",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "publish"
   ],
   "icon": "./icon.svg",
   "os": [
@@ -41,6 +43,15 @@
     "bundle": {
       "patch": "./cordis.patch.yml"
     }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Jiangshuaiye1203/dsh-reminder-notify.git"
+  },
+  "homepage": "https://jiangshuaiye1203.github.io/dsh-reminder-notify/",
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
   },
   "license": "MIT"
 }
