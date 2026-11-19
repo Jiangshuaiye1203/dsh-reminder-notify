@@ -65,6 +65,9 @@ window.__ModuleLoader__.load({
       powershellPath: 'PowerShell 可执行文件',
       clientDir: '客户端目录（仅 exe 模式）',
       empty: '（留空用默认）',
+      browse: '浏览…',
+      picking: '选择中…',
+      pickFailed: '打开目录选择器失败：',
       save: '保存',
       saving: '保存中…',
       reset: '撤销修改',
@@ -126,6 +129,9 @@ window.__ModuleLoader__.load({
       powershellPath: 'PowerShell executable',
       clientDir: 'Client directory (exe mode)',
       empty: '(empty uses the default)',
+      browse: 'Browse…',
+      picking: 'Choosing…',
+      pickFailed: 'Could not open the directory picker: ',
       save: 'Save',
       saving: 'Saving…',
       reset: 'Discard changes',
@@ -158,6 +164,9 @@ window.__ModuleLoader__.load({
 .drn-btn { font: inherit; font-size: 13px; padding: 6px 14px; border-radius: 7px; cursor: pointer; border: 1px solid var(--dsw-alias-border-l1); background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-primary); }
 .drn-btn.primary { background: var(--dsw-alias-brand-primary); border-color: transparent; color: #fff; }
 .drn-btn[disabled] { opacity: .5; cursor: default; }
+.drn-pick { display: flex; gap: 6px; width: 100%; align-items: center; }
+.drn-pick .drn-input { flex: 1 1 auto; min-width: 0; }
+.drn-btn.small { padding: 5px 10px; white-space: nowrap; }
 .drn-msg { font-size: 12px; color: var(--dsw-alias-label-secondary); }
 .drn-msg.error { color: var(--dsw-alias-state-error-primary); }
 `
@@ -171,7 +180,7 @@ window.__ModuleLoader__.load({
       { key: 'doneAudio', group: 'audio', kind: 'text' },
       { key: 'decideAudio', group: 'audio', kind: 'text' },
       { key: 'rawAudio', group: 'audio', kind: 'text' },
-      { key: 'audioDir', group: 'audio', kind: 'text' },
+      { key: 'audioDir', group: 'audio', kind: 'text', pick: 'directory' },
       { key: 'accentDone', group: 'look', kind: 'color' },
       { key: 'accentDecide', group: 'look', kind: 'color' },
       { key: 'accentRaw', group: 'look', kind: 'color' },
@@ -188,7 +197,7 @@ window.__ModuleLoader__.load({
       { key: 'hostMode', group: 'host', kind: 'select', options: ['script', 'exe'], optionLabels: ['hostModeScript', 'hostModeExe'] },
       { key: 'scriptPath', group: 'host', kind: 'text' },
       { key: 'powershellPath', group: 'host', kind: 'text' },
-      { key: 'clientDir', group: 'host', kind: 'text' },
+      { key: 'clientDir', group: 'host', kind: 'text', pick: 'directory' },
     ]
 
     const HINTS = {
@@ -226,6 +235,7 @@ window.__ModuleLoader__.load({
       const revision = state && state.revision
       const [draft, setDraft] = React.useState(null)
       const [busy, setBusy] = React.useState(false)
+      const [picking, setPicking] = React.useState(false)
       const [message, setMessage] = React.useState(null)
 
       if (props.view === 'summary') {
@@ -282,6 +292,26 @@ window.__ModuleLoader__.load({
           })
       }
 
+      // 目录类字段的「浏览…」：调宿主原生的目录选择器（client uiWorkspace.pickDirectory），
+      // 选完直接把绝对路径写进草稿；面板拿不到选择器时按钮不渲染，字段照旧手填。
+      function browse(key) {
+        const pick = props.pickDirectory
+        if (typeof pick !== 'function' || picking) return
+        setPicking(true)
+        setMessage(null)
+        Promise.resolve()
+          .then(() => pick())
+          .then((picked) => {
+            setPicking(false)
+            if (typeof picked === 'string' && picked !== '') edit(key, picked, 'text')
+          })
+          .catch((error) => {
+            setPicking(false)
+            const prefix = typeof t === 'function' ? t('pickFailed') : 'pick failed: '
+            setMessage({ ok: false, text: prefix + String((error && error.message) || error) })
+          })
+      }
+
       function control(field) {
         const value = effective[field.key]
         const disabled = !writable || busy
@@ -311,7 +341,7 @@ window.__ModuleLoader__.load({
             onChange: (e) => edit(field.key, e.target.value, 'color'),
           })
         }
-        return h('input', {
+        const input = h('input', {
           className: 'drn-input',
           type: field.kind === 'number' ? 'number' : 'text',
           value: value === undefined || value === null ? '' : String(value),
@@ -319,6 +349,19 @@ window.__ModuleLoader__.load({
           disabled,
           onChange: (e) => edit(field.key, e.target.value, field.kind),
         })
+        if (field.pick === 'directory' && typeof props.pickDirectory === 'function') {
+          return h(
+            'div',
+            { className: 'drn-pick' },
+            input,
+            h(
+              'button',
+              { type: 'button', className: 'drn-btn small', disabled: disabled || picking, onClick: () => browse(field.key) },
+              typeof t === 'function' ? t(picking ? 'picking' : 'browse') : 'Browse…',
+            ),
+          )
+        }
+        return input
       }
 
       const groups = GROUPS.map((group) =>
@@ -380,6 +423,13 @@ window.__ModuleLoader__.load({
     function apply(ctx) {
       ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'dsh-reminder-notify: settings dictionaries')
 
+      // 目录选择器来自 Client 的 uiWorkspace 服务；旧宿主没有这个服务时保持 undefined，
+      // 面板会退化成纯手填，不影响保存。
+      const workspace = typeof ctx.get === 'function' ? ctx.get('uiWorkspace') : undefined
+      const pickDirectory = workspace && typeof workspace.pickDirectory === 'function'
+        ? () => workspace.pickDirectory()
+        : undefined
+
       ctx.effect(() => {
         if (typeof document === 'undefined') return
         const previous = document.getElementById('drn-panel-style')
@@ -400,7 +450,7 @@ window.__ModuleLoader__.load({
             name: 'plugins.bundle.config',
             key: NS,
             locale: NS,
-            inject: () => ({ t: ctx.locale.bind(NS) }),
+            inject: () => ({ t: ctx.locale.bind(NS), pickDirectory }),
           },
           ReminderConfigPanel,
         ),
