@@ -22,6 +22,8 @@ param(
     [string]$Pos = 'br',
     [string]$Audio = '',
     [string]$Accent = '#2ECC71',
+    [string]$Background = '',
+    [string]$Icon = '',
     [switch]$NoSound,
     [string]$Log = ''
 )
@@ -114,6 +116,33 @@ $measureGfx = [System.Drawing.Graphics]::FromImage($measureBmp)
 $measureGfx.TextRenderingHint = [System.Drawing.Text.TextRenderingHint]::AntiAliasGridFit
 
 $textWidth = $width - (2 * $padX) - $accentWidth - 6
+
+# ---- 自定义外观：背景图与标题左侧图标（都可缺省） ---------------------------
+$iconSize = 22
+$iconGap = 8
+$bgBitmap = $null
+$iconBitmap = $null
+if (-not [string]::IsNullOrEmpty($Background) -and (Test-Path -LiteralPath $Background)) {
+    try {
+        # 先读进内存，避免 GDI+ 锁住用户文件
+        $bgBitmap = New-Object System.Drawing.Bitmap((New-Object System.IO.MemoryStream(,[System.IO.File]::ReadAllBytes($Background))))
+        Write-Log ('background ' + $Background)
+    } catch {
+        $bgBitmap = $null
+        Write-Log ('background-failed ' + $_.Exception.Message)
+    }
+}
+if (-not [string]::IsNullOrEmpty($Icon) -and (Test-Path -LiteralPath $Icon)) {
+    try {
+        $iconBitmap = New-Object System.Drawing.Bitmap((New-Object System.IO.MemoryStream(,[System.IO.File]::ReadAllBytes($Icon))))
+        Write-Log ('icon ' + $Icon)
+    } catch {
+        $iconBitmap = $null
+        Write-Log ('icon-failed ' + $_.Exception.Message)
+    }
+}
+$hasIcon = $iconBitmap -ne $null
+if ($hasIcon) { $textWidth = $textWidth - $iconSize - $iconGap }
 $titleSize = $measureGfx.MeasureString($Title, $titleFont, $textWidth)
 $bodyText = if ([string]::IsNullOrWhiteSpace($Msg)) { '' } else { $Msg }
 $bodySize = if ($bodyText -eq '') { New-Object System.Drawing.SizeF 0, 0 } else { $measureGfx.MeasureString($bodyText, $bodyFont, $textWidth) }
@@ -176,6 +205,19 @@ $form.Add_Paint({
     $barRect = New-Object System.Drawing.Rectangle 0, 0, ($accentWidth + 8), $height
     $oldClip = $g.Clip
     $g.SetClip($path)
+    # 背景图：等比裁切鋪满，再压一层暗色保证白字可读
+    if ($bgBitmap -ne $null) {
+        $g.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+        $scale = [Math]::Max($width / $bgBitmap.Width, $height / $bgBitmap.Height)
+        $drawW = [int][Math]::Ceiling($bgBitmap.Width * $scale)
+        $drawH = [int][Math]::Ceiling($bgBitmap.Height * $scale)
+        $dx = [int](($width - $drawW) / 2)
+        $dy = [int](($height - $drawH) / 2)
+        $g.DrawImage($bgBitmap, (New-Object System.Drawing.Rectangle $dx, $dy, $drawW, $drawH))
+        $shade = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(150, 12, 15, 20))
+        $g.FillRectangle($shade, 0, 0, $width, $height)
+        $shade.Dispose()
+    }
     $barBrush = New-Object System.Drawing.SolidBrush $accentColor
     $g.FillRectangle($barBrush, $barRect)
     $barBrush.Dispose()
@@ -187,6 +229,12 @@ $form.Add_Paint({
     $pen.Dispose()
 
     $textLeft = $accentWidth + $padX
+    if ($hasIcon) {
+        $g.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+        $iconRect = New-Object System.Drawing.Rectangle $textLeft, ($padX - 1), $iconSize, $iconSize
+        $g.DrawImage($iconBitmap, $iconRect)
+        $textLeft = $textLeft + $iconSize + $iconGap
+    }
     $titleBrush = New-Object System.Drawing.SolidBrush $titleColor
     $g.DrawString($Title, $titleFont, $titleBrush, $textLeft, $padX - 2)
     $titleBrush.Dispose()
@@ -283,5 +331,7 @@ if ($script:wmp -ne $null) {
 $titleFont.Dispose()
 $bodyFont.Dispose()
 $hintFont.Dispose()
+if ($bgBitmap -ne $null) { $bgBitmap.Dispose() }
+if ($iconBitmap -ne $null) { $iconBitmap.Dispose() }
 $path.Dispose()
 Write-Log 'exit'
