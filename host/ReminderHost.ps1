@@ -25,6 +25,7 @@ param(
     [string]$Background = '',
     [string]$Icon = '',
     [switch]$NoSound,
+    [switch]$Preview,
     [string]$Log = ''
 )
 
@@ -314,6 +315,25 @@ if (-not $NoSound -and -not [string]::IsNullOrEmpty($Audio) -and (Test-Path -Lit
     } catch {
         Write-Log ('audio-failed ' + $ext + ' ' + $_.Exception.Message)
     }
+}
+
+# ---- 试听：只放声音，不弹卡 ----------------------------------------------------
+# 面板里的「试听」按钮走这条分支：播完（或最多 8 秒）就退出，不留窗口。
+if ($Preview) {
+    if ($script:player -ne $null) {
+        $deadline = (Get-Date).AddSeconds(8)
+        while ((Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 200 }
+        try { $script:player.Stop() } catch { }
+        $script:player.Dispose()
+    }
+    if ($script:wmp -ne $null) {
+        $deadline = (Get-Date).AddSeconds(8)
+        while ((Get-Date) -lt $deadline -and $script:wmp.playState -ne 1) { Start-Sleep -Milliseconds 200 }
+        try { $script:wmp.controls.stop(); $script:wmp.close() } catch { }
+        try { [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($script:wmp) } catch { }
+    }
+    Write-Log 'preview exit'
+    exit 0
 }
 
 # ---- 显示并进入消息循环 -----------------------------------------------------
