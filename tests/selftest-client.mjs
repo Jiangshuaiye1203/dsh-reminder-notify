@@ -13,6 +13,7 @@ const source = fs.readFileSync(path.join(here, '..', 'client.js'), 'utf8')
 
 const CONFIG_URL = '/dsh-reminder-notify/config'
 const AUDIO_URL = '/dsh-reminder-notify/audio'
+const PREVIEW_URL = '/dsh-reminder-notify/preview'
 
 // ---- 极简 React 桩：createElement / useState / useEffect ----
 function createReactStub() {
@@ -243,23 +244,40 @@ try {
     api.restore()
   }
 
-  // ---- 4. 提示音下拉：音频路由返回清单后，三个提示音字段都出现下拉 ----
+  // ---- 4. 提示音下拉按扩展名分组 + 试听按钮 POST 到宿主 ----
   react.reset()
   api = mockFetch((request) => {
+    if (request.url.startsWith(PREVIEW_URL)) {
+      return { body: { ok: true, kind: 'done', audio: 'D:\\\\提示音\\\\完成提醒语音.wav' } }
+    }
     if (request.url.startsWith(AUDIO_URL)) {
       return { body: { dir: 'D:\\\\提示音', files: ['完成提醒语音.wav', '需要你来决定.mp3'] } }
     }
     return { body: { ok: true, writable: true, values: Object.assign({}, baseValues, { doneAudio: '', audioDir: 'D:\\\\提示音' }) } }
   })
   try {
-    const tree = await mount({ view: 'page', t })
+    let tree = await mount({ view: 'page', t })
     const allSelects = findAll(tree, (node) => node.type === 'select' && node.props.className === 'drn-select')
     const audioSelects = allSelects.filter(
       (node) => findAll(node, (child) => child.type === 'option' && child.props.value === '完成提醒语音.wav').length === 1,
     )
     assert.equal(audioSelects.length, 3, '三个提示音字段都应该有下拉，实际 ' + audioSelects.length)
+    const groups = findAll(audioSelects[0], (node) => node.type === 'optgroup').map((node) => node.props.label)
+    assert.deepEqual(groups, ['mp3', 'wav'], '下拉应按扩展名分组，实际：' + JSON.stringify(groups))
     const options = findAll(audioSelects[0], (node) => node.type === 'option').map((node) => node.props.value)
-    assert.deepEqual(options, ['', '完成提醒语音.wav', '需要你来决定.mp3'], '下拉选项不对：' + JSON.stringify(options))
+    assert.deepEqual(options, ['', '需要你来决定.mp3', '完成提醒语音.wav'], '下拉选项不对：' + JSON.stringify(options))
+
+    const previewButton = findAll(tree, (node) => node.type === 'button' && /drn-preview/.test(node.props.className || ''))[0]
+    assert.ok(previewButton, '每个提示音字段旁边应该有「试听」按钮')
+    previewButton.props.onClick()
+    await tick()
+    const posts = api.calls.filter((call) => call.url.startsWith(PREVIEW_URL))
+    assert.equal(posts.length, 1, '点试听应该 POST 一次 /preview')
+    assert.equal(posts[0].method, 'POST', '试听必须用 POST')
+    assert.deepEqual(posts[0].body, { kind: 'done' }, '试听请求体应为 { kind }')
+
+    tree = await mount({ view: 'page', t })
+    assert.match(collectText(tree), /已播放/, '试听成功后应给出提示')
     console.log('audio-select ok')
   } finally {
     api.restore()
