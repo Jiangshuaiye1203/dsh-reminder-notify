@@ -75,7 +75,39 @@ dsh plugin --profile desktop add "git+https://github.com/<你的账号>/dsh-remi
 
 忘了第 3 步，索引里就还是旧提交，别人装到的也是旧代码。
 
-## 6. 上架前值得知道的三件事
+## 6. 改走 npm 源（国内可装）
+
+git 源要求安装方能直连 github.com，国内无代理基本装不上。索引格式 1 的版本节点还支持 `source: { "type": "npm" }`，
+此时市场用 `pnpm add <包名>@<版本>` 安装，走 npm 源，国内镜像可用。
+
+一次性的准备（只需要做一次）：
+
+1. 在 https://www.npmjs.com/signup 注册账号并验证邮箱；
+2. 双击 `scripts/publish-npm.cmd`（内部会自动找 DSH 自带的 node + pnpm），按提示登录并发布
+   `dsh-reminder-notify@0.2.0`。密码由 npm 自己处理，脚本只负责串起登录和发布两步；
+3. 确认 https://www.npmjs.com/package/dsh-reminder-notify 能打开。
+
+发布成功后，把索引的装源改成 npm：
+
+```bash
+# 没有 node 在 PATH 时，用 DSH 自带的 node：%USERPROFILE%\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\node\bin\node.exe
+node scripts/build-index.mjs --npm --publish
+git push
+```
+
+产物的版本节点变成：
+
+```json
+{ "version": "0.2.0", "publishTimestamp": 1795011057, "source": { "type": "npm" }, "engines": {} }
+```
+
+以后发新版：改版本号 → `publish-npm.cmd` 发布新版本 → `build-index.mjs --npm --publish` → push。
+版本号一旦发布就不能覆盖，改代码要顺带抬版本。
+
+> 想指定镜像（如 `https://registry.npmmirror.com`）可加 `--registry`；
+> 不指定就由安装方用自己的 npm 源。发布本身必须发到 registry.npmjs.org。
+
+## 7. 上架前值得知道的三件事
 
 - **只有 Windows 能用**：插件 `os: ["win32"]`，卡片宿主是 PowerShell 5.1 + WinForms（系统自带）。
 - **没有 exe，所以不触发 SmartScreen**：仓库里唯一的二进制是两个 wav，宿主 `host/ReminderHost.ps1` 是可直接审计的文本。代价是每次弹卡片要起一个 PowerShell 进程（`Add-Type` 编译约 0.6 s），以及这台机器必须允许 PowerShell 执行本地脚本——脚本用 `-ExecutionPolicy Bypass` 调起，不改系统策略。
