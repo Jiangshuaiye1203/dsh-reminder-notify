@@ -1,5 +1,6 @@
-// client.js 的离线自检：用极简 React/DOM 桩把设置面板渲染一遍，
-// 断言「摘要文案」「改动字段 → mutate 的 ops」「只读时按钮禁用」三条行为。
+// client.js 的离线自检：用极简 React/DOM 桩把设置面板渲染一遍。
+// 面板的数据来自插件自己注册的同源 HTTP 路由（/dsh-reminder-notify/config 与 /audio），
+// 所以这里 mock globalThis.fetch，断言：摘要文案、读取配置、保存 POST、目录选择、提示音下拉、只读、读取失败重试。
 // 运行：node tests/selftest-client.mjs
 
 import assert from 'node:assert/strict'
@@ -10,12 +11,14 @@ import { fileURLToPath } from 'node:url'
 const here = path.dirname(fileURLToPath(import.meta.url))
 const source = fs.readFileSync(path.join(here, '..', 'client.js'), 'utf8')
 
-// ---- 极简 React 桩：只实现 createElement / useState ----
+const CONFIG_URL = '/dsh-reminder-notify/config'
+const AUDIO_URL = '/dsh-reminder-notify/audio'
+
+// ---- 极简 React 桩：createElement / useState / useEffect ----
 function createReactStub() {
   let hooks = []
   const effects = []
   let cursor = 0
-  let rerender = null
   const stub = {
     createElement(type, props, ...children) {
       const merged = Object.assign({}, props)
@@ -29,7 +32,6 @@ function createReactStub() {
       if (!(index in hooks)) hooks[index] = typeof initial === 'function' ? initial() : initial
       const set = (next) => {
         hooks[index] = typeof next === 'function' ? next(hooks[index]) : next
-        if (rerender !== null) rerender()
       }
       return [hooks[index], set]
     },
@@ -50,15 +52,47 @@ function createReactStub() {
       effects.length = 0
       hooks = []
       cursor = 0
-      rerender = null
-    },
-    onRerender(fn) {
-      rerender = fn
     },
   }
 }
 
 const react = createReactStub()
+const tick = () => new Promise((resolve) => setTimeout(resolve, 20))
+
+function mockFetch(handler) {
+  const calls = []
+  const real = globalThis.fetch
+  globalThis.fetch = async (url, init) => {
+    const request = {
+      url: String(url),
+      method: (init && init.method) || 'GET',
+      body: init && init.body ? JSON.parse(init.body) : null,
+    }
+    calls.push(request)
+    const reply = handler(request)
+    const status = reply.status === undefined ? 200 : reply.status
+    return { ok: status < 400, status, json: async () => reply.body }
+  }
+  return { calls, restore() { globalThis.fetch = real } }
+}
+
+const baseValues = {
+  seconds: 60,
+  position: 'br',
+  sound: true,
+  cooldownMs: 1500,
+  doneAudio: '完成提醒语音.wav',
+  decideAudio: '需要你来决定.wav',
+  rawAudio: '',
+  audioDir: '',
+  accentDone: '#2ECC71',
+  accentDecide: '#F5A623',
+  accentRaw: '#4C8DFF',
+  hostMode: 'script',
+  scriptPath: '',
+  powershellPath: 'powershell.exe',
+  clientDir: '',
+}
 
 // ---- 模块加载桩 ----
 let loaded = null
@@ -95,12 +129,13 @@ try {
   // ---- 用假的 ctx 跑 apply，拿到注册的面板组件 ----
   let panel = null
   let zhDict = {}
-  const registered = []
   const ctx = {
-    effect(factory, label) {
+    effect(factory) {
       const cleanup = factory()
-      if (typeof cleanup === 'function') registered.push(cleanup)
-      return () => {}
+      return typeof cleanup === 'function' ? cleanup : () => {}
+    },
+    get() {
+      return undefined
     },
     locale: {
       register(ns, dicts) {
@@ -109,7 +144,7 @@ try {
         zhDict = dicts.zh
         return () => {}
       },
-      bind(ns) {
+      bind() {
         return (key) => (Object.prototype.hasOwnProperty.call(zhDict, key) ? zhDict[key] : key)
       },
     },
@@ -133,139 +168,137 @@ try {
 
   const t = ctx.locale.bind('dsh-reminder-notify')
 
+  // 渲染一次并跑完 effect（读完配置），然后重渲染拿到就绪态
+  async function mount(props) {
+    react.begin()
+    panel(props)
+    react.runEffects()
+    await tick()
+    react.begin()
+    return panel(props)
+  }
+
   // ---- 1. summary 视图 ----
-  const summary = panel({ view: 'summary', form: undefined, t })
-  const summaryText = collectText(summary)
-  assert.match(summaryText, /桌面提醒：右下角 · 60 秒 · 提示音开/, 'summary 文案不对：' + summaryText)
+  const summary = panel({ view: 'summary', t })
+  assert.match(collectText(summary), /桌面提醒：右下角 · 60 秒 · 提示音开/, 'summary 文案不对')
 
-  // ---- 2. page 视图 + 保存 ----
-  const saved = []
-  let currentValue = { seconds: 60, position: 'br', sound: true, cooldownMs: 1500, doneAudio: '完成提醒语音.wav', decideAudio: '需要你来决定.wav', rawAudio: '', audioDir: '', accentDone: '#2ECC71', accentDecide: '#F5A623', accentRaw: '#4C8DFF', hostMode: 'script', scriptPath: '', powershellPath: 'powershell.exe', clientDir: '' }
-  const form = {
-    state: { value: currentValue, revision: 7, writable: true, status: 'ready' },
-    mutate(ops, revision) {
-      saved.push({ ops, revision })
-      const next = Object.assign({}, currentValue)
-      for (const op of ops) next[op.path[0]] = op.value
-      currentValue = next
-      form.state = Object.assign({}, form.state, { value: next, revision: revision + 1 })
-      return Promise.resolve(true)
-    },
-  }
-
-  let tree = render()
-  // 找到秒数输入框并模拟用户输入 90
-  const secondsInput = findAll(tree, (node) => node.type === 'input' && node.props.type === 'number')[0]
-  assert.ok(secondsInput, '没有找到数字输入框')
-  secondsInput.props.onChange({ target: { value: '90' } })
-  tree = render()
-  const saveButton = findAll(tree, (node) => node.type === 'button' && /drn-btn primary/.test(node.props.className || ''))[0]
-  assert.ok(saveButton, '没有找到保存按钮')
-  assert.equal(saveButton.props.disabled, false, '有改动时保存按钮应可用')
-  saveButton.props.onClick()
-
-  await new Promise((resolve) => setTimeout(resolve, 20))
-  assert.equal(saved.length, 1, '没有调用 form.mutate')
-  assert.deepEqual(saved[0].ops, [{ op: 'set', path: ['seconds'], value: 90 }], 'ops 不对：' + JSON.stringify(saved[0].ops))
-  assert.equal(saved[0].revision, 7, 'revision 应该原样传回宿主')
-
-  // ---- 3. 目录选择按钮：点「浏览…」把宿主选中的目录填进字段 ----
+  // ---- 2. page 视图：读取配置 → 改秒数 → 保存发出 POST ----
   react.reset()
-  const pickCalls = []
-  const pickProps = {
-    t,
-    pickDirectory: () => {
-      pickCalls.push(1)
-      return Promise.resolve('D:\\我的提示音')
-    },
-  }
-  const pickForm = {
-    state: { value: { seconds: 60, position: 'br', sound: true, audioDir: '', clientDir: '' }, revision: 11, writable: true, status: 'ready' },
-    mutate() {
-      throw new Error('选择目录后还没点保存，不应该调用 mutate')
-    },
-  }
-  react.begin()
-  let pickTree = panel(Object.assign({ view: 'page', form: pickForm }, pickProps))
-  const browseButton = findAll(pickTree, (node) => node.type === 'button' && /drn-btn small/.test(node.props.className || ''))[0]
-  assert.ok(browseButton, '目录字段旁边应该有「浏览…」按钮')
-  browseButton.props.onClick()
-  await new Promise((resolve) => setTimeout(resolve, 20))
-  assert.equal(pickCalls.length, 1, '点浏览应该调用一次 pickDirectory')
-  react.begin()
-  pickTree = panel(Object.assign({ view: 'page', form: pickForm }, pickProps))
-  const pickedInput = findAll(pickTree, (node) => node.type === 'input' && node.props.value === 'D:\\我的提示音')[0]
-  assert.ok(pickedInput, '选中的目录没有填进输入框')
-  console.log('picker ok')
-
-  // ---- 4. 音频目录扫描：Host 路由返回清单后，提示音字段旁出现下拉 ----
-  react.reset()
-  const realFetch = globalThis.fetch
-  globalThis.fetch = async (url) => {
-    assert.match(String(url), /^\/dsh-reminder-notify\/audio/, '应该请求 Host 的音频索引路由：' + url)
-    return {
-      ok: true,
-      status: 200,
-      json: async () => ({ dir: 'D:\\提示音', files: ['完成提醒语音.wav', '需要你来决定.mp3'] }),
+  let stored = Object.assign({}, baseValues)
+  let api = mockFetch((request) => {
+    if (request.url !== CONFIG_URL) throw new Error('unexpected url: ' + request.url)
+    if (request.method === 'POST') {
+      stored = Object.assign({}, stored, request.body.values)
+      return { body: { ok: true, writable: true, values: stored } }
     }
-  }
+    return { body: { ok: true, writable: true, values: stored } }
+  })
   try {
-    const audioForm = {
-      state: { value: { seconds: 60, position: 'br', sound: true, doneAudio: '', audioDir: 'D:\\提示音' }, revision: 3, writable: true, status: 'ready' },
-      mutate() {
-        throw new Error('只是选择文件，还没点保存，不应该调用 mutate')
+    let tree = await mount({ view: 'page', t })
+    assert.equal(api.calls.filter((call) => call.method === 'GET').length >= 1, true, '面板应该先 GET 配置')
+
+    const secondsInput = findAll(tree, (node) => node.type === 'input' && node.props.type === 'number')[0]
+    assert.ok(secondsInput, '没有找到数字输入框')
+    secondsInput.props.onChange({ target: { value: '90' } })
+    tree = await mount({ view: 'page', t })
+
+    const saveButton = findAll(tree, (node) => node.type === 'button' && /drn-btn primary/.test(node.props.className || ''))[0]
+    assert.ok(saveButton, '没有找到保存按钮')
+    assert.equal(saveButton.props.disabled, false, '有改动时保存按钮应可用')
+    saveButton.props.onClick()
+    await tick()
+
+    const posts = api.calls.filter((call) => call.method === 'POST')
+    assert.equal(posts.length, 1, '应该 POST 一次')
+    assert.deepEqual(posts[0].body, { values: { seconds: 90 } }, 'POST body 不对：' + JSON.stringify(posts[0].body))
+  } finally {
+    api.restore()
+  }
+
+  // ---- 3. 目录选择按钮：把宿主选中的目录填进字段 ----
+  react.reset()
+  api = mockFetch(() => ({ body: { ok: true, writable: true, values: Object.assign({}, baseValues, { audioDir: '' }) } }))
+  try {
+    const pickCalls = []
+    const props = {
+      view: 'page',
+      t,
+      pickDirectory: () => {
+        pickCalls.push(1)
+        return Promise.resolve('D:\\\\我的提示音')
       },
     }
-    react.begin()
-    panel({ view: 'page', form: audioForm, t })
-    react.runEffects()
-    await new Promise((resolve) => setTimeout(resolve, 20))
-    react.begin()
-    const audioTree = panel({ view: 'page', form: audioForm, t })
-    const selects = findAll(audioTree, (node) => node.type === 'select' && node.props.className === 'drn-select')
-    const audioSelects = selects.filter((node) =>
-      findAll(node, (child) => child.type === 'option' && child.props.value === '完成提醒语音.wav').length === 1,
+    let tree = await mount(props)
+    const browseButton = findAll(tree, (node) => node.type === 'button' && /drn-btn small/.test(node.props.className || ''))[0]
+    assert.ok(browseButton, '目录字段旁边应该有「浏览…」按钮')
+    browseButton.props.onClick()
+    await tick()
+    assert.equal(pickCalls.length, 1, '点浏览应该调用一次 pickDirectory')
+
+    tree = await mount(props)
+    const picked = findAll(tree, (node) => node.type === 'input' && String(node.props.value || '') === 'D:\\\\我的提示音')[0]
+    assert.ok(picked, '选中的目录没有填进输入框')
+    console.log('picker ok')
+  } finally {
+    api.restore()
+  }
+
+  // ---- 4. 提示音下拉：音频路由返回清单后，三个提示音字段都出现下拉 ----
+  react.reset()
+  api = mockFetch((request) => {
+    if (request.url.startsWith(AUDIO_URL)) {
+      return { body: { dir: 'D:\\\\提示音', files: ['完成提醒语音.wav', '需要你来决定.mp3'] } }
+    }
+    return { body: { ok: true, writable: true, values: Object.assign({}, baseValues, { doneAudio: '', audioDir: 'D:\\\\提示音' }) } }
+  })
+  try {
+    const tree = await mount({ view: 'page', t })
+    const allSelects = findAll(tree, (node) => node.type === 'select' && node.props.className === 'drn-select')
+    const audioSelects = allSelects.filter(
+      (node) => findAll(node, (child) => child.type === 'option' && child.props.value === '完成提醒语音.wav').length === 1,
     )
     assert.equal(audioSelects.length, 3, '三个提示音字段都应该有下拉，实际 ' + audioSelects.length)
     const options = findAll(audioSelects[0], (node) => node.type === 'option').map((node) => node.props.value)
     assert.deepEqual(options, ['', '完成提醒语音.wav', '需要你来决定.mp3'], '下拉选项不对：' + JSON.stringify(options))
     console.log('audio-select ok')
   } finally {
-    globalThis.fetch = realFetch
+    api.restore()
   }
 
-  // ---- 5. 只读时不能保存 ----
+  // ---- 5. 只读：保存按钮与输入框都禁用 ----
   react.reset()
-  currentValue = Object.assign({}, currentValue)
-  const readonlyForm = {
-    state: { value: currentValue, revision: 8, writable: false, status: 'ready' },
-    mutate() {
-      throw new Error('只读状态不应该调用 mutate')
-    },
+  api = mockFetch(() => ({ body: { ok: true, writable: false, values: Object.assign({}, baseValues) } }))
+  try {
+    const tree = await mount({ view: 'page', t })
+    const saveButton = findAll(tree, (node) => node.type === 'button' && /drn-btn primary/.test(node.props.className || ''))[0]
+    assert.equal(saveButton.props.disabled, true, '只读时保存按钮必须禁用')
+    const disabledInputs = findAll(tree, (node) => node.type === 'input').filter((node) => node.props.disabled === true)
+    assert.ok(disabledInputs.length > 0, '只读时输入框必须禁用')
+    console.log('readonly ok')
+  } finally {
+    api.restore()
   }
-  let readonlyTree = renderForm(readonlyForm)
-  const disabledSave = findAll(readonlyTree, (node) => node.type === 'button' && /drn-btn primary/.test(node.props.className || ''))[0]
-  assert.equal(disabledSave.props.disabled, true, '只读时保存按钮必须禁用')
-  const disabledInputs = findAll(readonlyTree, (node) => node.type === 'input').filter((node) => node.props.disabled === true)
-  assert.ok(disabledInputs.length > 0, '只读时输入框必须禁用')
 
-  // ---- 4. 没有 form 时给提示而不是崩溃 ----
+  // ---- 6. 读取失败：给出错误提示与「重试」，点重试会重新 GET ----
   react.reset()
-  const fallback = panel({ view: 'page', form: undefined, t })
-  assert.match(collectText(fallback), /cordis\.patch\.yml/, '缺少 form 时应提示改 cordis.patch.yml')
+  api = mockFetch(() => ({ status: 500, body: { ok: false, error: 'boom' } }))
+  try {
+    let tree = await mount({ view: 'page', t })
+    const text = collectText(tree)
+    assert.match(text, /读取配置失败/, '读取失败时应提示，实际：' + text)
+    assert.match(text, /boom/, '应带上错误细节')
+    const retry = findAll(tree, (node) => node.type === 'button' && /重试/.test(collectText(node)))[0]
+    assert.ok(retry, '应该有重试按钮')
+    const before = api.calls.length
+    retry.props.onClick()
+    tree = await mount({ view: 'page', t })
+    assert.ok(api.calls.length > before, '点重试应该重新请求配置')
+    console.log('load-error ok')
+  } finally {
+    api.restore()
+  }
 
   console.log('client selftest ok')
-
-  // 重渲染：在没有真实 DOM 的情况下，component() 返回的树即最新状态
-  function render() {
-    react.begin()
-    return panel({ view: 'page', form, t })
-  }
-
-  function renderForm(owner) {
-    react.begin()
-    return panel({ view: 'page', form: owner, t })
-  }
 } finally {
   globalThis.window = realWindow
   globalThis.document = realDocument
