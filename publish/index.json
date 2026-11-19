@@ -48,12 +48,10 @@
       },
       "versions": [
         {
-          "version": "0.2.0",
-          "publishTimestamp": 1795010917,
+          "version": "0.2.2",
+          "publishTimestamp": 1795054082,
           "source": {
-            "type": "git",
-            "url": "https://github.com/Jiangshuaiye1203/dsh-reminder-notify",
-            "commit": "923cfe625fc737e1b39ba3cfc382061100a67e02"
+            "type": "npm"
           },
           "engines": {}
         }
