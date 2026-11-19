@@ -1,6 +1,6 @@
 // 自检：不启动 DSH，用假 ctx 把插件当普通模块跑一遍，真的弹一次提醒。
 import { fileURLToPath } from 'node:url'
-import { apply, listAudioFiles } from './index.js'
+import { apply, listAudioFiles, previewAudio } from './index.js'
 
 let captured
 function makeCtx(sink) {
@@ -128,3 +128,11 @@ if (liveOut.seconds !== 90) throw new Error("volatile 字段没有解包：secon
 if (!/完成提醒语音\.wav$/.test(String(liveOut.audio))) throw new Error("volatile 字段没有解包：audio=" + String(liveOut.audio))
 if (liveOut.title !== "热更 Harness 已完成工作") throw new Error("volatile 模板没有生效：" + liveOut.title)
 console.log("volatile ok", liveOut.seconds, "|", liveOut.audio, "|", liveOut.title)
+
+
+// 试听接口的错误分支：没有配置音频 / 文件不存在，都要给出明确原因而不是起进程。
+const missingAudio = await previewAudio('raw', { audioDir: fileURLToPath(new URL('./assets/提示音导入', import.meta.url)), rawAudio: '' })
+if (missingAudio.ok !== false || missingAudio.error !== 'no-audio') throw new Error('空配置应该返回 no-audio：' + JSON.stringify(missingAudio))
+const absentAudio = await previewAudio('done', { audioDir: fileURLToPath(new URL('./assets/提示音导入', import.meta.url)), doneAudio: '不存在.wav' })
+if (absentAudio.ok !== false || absentAudio.error !== 'audio-not-found') throw new Error('缺失文件应该返回 audio-not-found：' + JSON.stringify(absentAudio))
+console.log('preview ok', missingAudio.error, '|', absentAudio.error)

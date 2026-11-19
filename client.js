@@ -18,6 +18,20 @@ window.__ModuleLoader__.load({
     const AUDIO_ROUTE = '/dsh-reminder-notify/audio'
     const CONFIG_ROUTE = '/dsh-reminder-notify/config'
     const AUDIO_KEYS = ['doneAudio', 'decideAudio', 'rawAudio']
+    const PREVIEW_ROUTE = '/dsh-reminder-notify/preview'
+    // 下拉按扩展名分组：wav 一组、mp3 一组……组内按文件名排序，一眼能看出格式。
+    function groupAudioFiles(files) {
+      const byExt = new Map()
+      for (const name of files) {
+        const dot = name.lastIndexOf('.')
+        const ext = dot >= 0 ? name.slice(dot + 1).toLowerCase() : 'other'
+        if (!byExt.has(ext)) byExt.set(ext, [])
+        byExt.get(ext).push(name)
+      }
+      return [...byExt.entries()]
+        .sort((a, b) => a[0].localeCompare(b[0]))
+        .map(([ext, names]) => ({ ext, names: names.sort((a, b) => a.localeCompare(b, 'zh-Hans-CN')) }))
+    }
 
     const zh = {
       title: '桌面提醒设置',
@@ -75,6 +89,10 @@ window.__ModuleLoader__.load({
       audioScanning: '正在读取音频目录…',
       audioEmpty: '音频目录里没有可用的音频文件',
       audioFailed: '读取音频目录失败：',
+      preview: '试听',
+      previewing: '播放中…',
+      previewOk: '已播放：',
+      previewFailed: '试听失败：',
       hostMode: '宿主模式',
       hostModeScript: '包内脚本（推荐）',
       hostModeExe: '外部 exe 客户端',
@@ -153,6 +171,10 @@ window.__ModuleLoader__.load({
       audioScanning: 'Reading the sound directory…',
       audioEmpty: 'No audio files in the sound directory',
       audioFailed: 'Could not read the sound directory: ',
+      preview: 'Play',
+      previewing: 'Playing…',
+      previewOk: 'Played: ',
+      previewFailed: 'Preview failed: ',
       hostMode: 'Host mode',
       hostModeScript: 'Bundled script (recommended)',
       hostModeExe: 'External exe client',
@@ -281,6 +303,7 @@ window.__ModuleLoader__.load({
       const [draft, setDraft] = React.useState(null)
       const [busy, setBusy] = React.useState(false)
       const [picking, setPicking] = React.useState(false)
+      const [previewing, setPreviewing] = React.useState(null)
       const [message, setMessage] = React.useState(null)
       const [audio, setAudio] = React.useState({ dir: '', files: [], error: null })
 
@@ -440,6 +463,44 @@ window.__ModuleLoader__.load({
           })
       }
 
+      // 试听：面板没有本地文件访问能力，交给宿主按档位代播（POST /preview）。
+      // 先保存再用当前编辑值试听会更准，但这里刻意不落盘 —— 试听不该改动配置。
+      function previewAudio(key) {
+        if (previewing !== null) return
+        const kind = key === 'decideAudio' ? 'decide' : key === 'rawAudio' ? 'raw' : 'done'
+        setPreviewing(key)
+        setMessage(null)
+        Promise.resolve()
+          .then(() =>
+            fetch(PREVIEW_ROUTE, {
+              method: 'POST',
+              headers: { 'content-type': 'application/json', accept: 'application/json' },
+              body: JSON.stringify({ kind }),
+            }),
+          )
+          .then((response) => {
+            const status = response ? response.status : 0
+            const body = response && typeof response.json === 'function' ? response.json() : Promise.resolve(null)
+            return Promise.resolve(body)
+              .catch(() => null)
+              .then((data) => {
+                if (response && response.ok && data && data.ok !== false) return data
+                const detail = data && (data.detail || data.error) ? (data.detail || data.error) : 'HTTP ' + status
+                throw new Error(detail)
+              })
+          })
+          .then((data) => {
+            setPreviewing(null)
+            const label = typeof t === 'function' ? t('previewOk') : 'Playing: '
+            setMessage({ ok: true, text: label + String((data && data.audio) || '') })
+          })
+          .catch((error) => {
+            setPreviewing(null)
+            const prefix = typeof t === 'function' ? t('previewFailed') : 'preview failed: '
+            setMessage({ ok: false, text: prefix + String((error && error.message) || error) })
+          })
+      }
+
       function control(field) {
         const value = effective[field.key]
         const disabled = !writable || busy
@@ -478,6 +539,12 @@ window.__ModuleLoader__.load({
           onChange: (e) => edit(field.key, e.target.value, field.kind),
         })
         if (AUDIO_KEYS.includes(field.key) && audio.files.length > 0) {
+          const groups = groupAudioFiles(audio.files)
+          const options = [h('option', { value: '', key: '__pick' }, typeof t === 'function' ? t('audioPick') : 'pick')]
+          for (const group of groups) {
+            const children = group.names.map((name) => h('option', { key: name, value: name }, name))
+            options.push(h('optgroup', { key: 'grp-' + group.ext, label: group.ext }, children))
+          }
           return h(
             'div',
             { className: 'drn-pick' },
@@ -493,9 +560,19 @@ window.__ModuleLoader__.load({
                   if (picked !== '') edit(field.key, picked, 'text')
                 },
               },
-              [h('option', { value: '' }, typeof t === 'function' ? t('audioPick') : 'pick')].concat(
-                audio.files.map((name) => h('option', { value: name }, name)),
-              ),
+              options,
+            ),
+            h(
+              'button',
+              {
+                type: 'button',
+                className: 'drn-btn small drn-preview',
+                disabled: disabled || previewing !== null,
+                onClick: () => previewAudio(field.key),
+              },
+              previewing === field.key
+                ? (typeof t === 'function' ? t('previewing') : 'Playing…')
+                : (typeof t === 'function' ? t('preview') : 'Play'),
             ),
           )
         }

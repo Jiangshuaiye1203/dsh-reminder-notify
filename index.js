@@ -435,6 +435,7 @@ function toolDefinition(getSettings) {
 const AUDIO_EXTENSIONS = ['.wav', '.mp3', '.ogg', '.m4a', '.flac', '.aac', '.wma']
 const AUDIO_ROUTE = '/dsh-reminder-notify/audio'
 const CONFIG_ROUTE = '/dsh-reminder-notify/config'
+const PREVIEW_ROUTE = '/dsh-reminder-notify/preview'
 
 // 面板要「把音频目录里的文件列成下拉」，但 Client 侧没有任何读文件能力，
 // 所以由 Host 注册一条只读的 GET 路由，页面用同源 fetch 取这个 JSON。
@@ -486,6 +487,45 @@ function registerAudioRoute(ctx, getSettings) {
       if (typeof dispose === 'function') dispose()
     }
   }, 'dsh-reminder-notify: audio list route')
+}
+
+// 试听：只按档位放一遍提示音，不弹卡。面板拿不到本地音频文件，所以由宿主代播。
+export async function previewAudio(kind, settings) {
+  if (process.platform !== 'win32') {
+    return { ok: false, error: 'only-windows', detail: '试听只能在 Windows 上播放' }
+  }
+  const audio = audioNameOf(kind, settings)
+  if (audio === '') {
+    return { ok: false, error: 'no-audio', detail: '这个档位没有配置提示音（留空 = 静音）' }
+  }
+  const audioPath = path.join(path.resolve(settings.audioDir), audio)
+  if (!fs.existsSync(audioPath)) {
+    return { ok: false, error: 'audio-not-found', detail: `找不到音频文件：${audioPath}` }
+  }
+  const scriptPath = path.resolve(settings.scriptPath)
+  if (!fs.existsSync(scriptPath)) {
+    return { ok: false, error: 'host-script-not-found', detail: `找不到提醒脚本宿主：${scriptPath}` }
+  }
+  const argv = [
+    '-NoProfile',
+    '-NonInteractive',
+    '-ExecutionPolicy',
+    'Bypass',
+    '-WindowStyle',
+    'Hidden',
+    '-File',
+    scriptPath,
+    '-Preview',
+    '-Audio',
+    audioPath,
+  ]
+  try {
+    const { pid, exited } = await launch(settings.powershellPath, argv, PACKAGE_ROOT)
+    const early = await Promise.race([exited, new Promise((r) => setTimeout(() => r('running'), 900))])
+    return { ok: true, kind, audio: audioPath, pid, earlyExit: early === 'running' ? null : early }
+  } catch (error) {
+    return { ok: false, error: 'spawn-failed', detail: String((error && error.message) || error) }
+  }
 }
 
 function readJsonBody(req, limit = 256 * 1024) {
@@ -564,9 +604,50 @@ function registerConfigRoute(ctx, getSettings) {
   }, 'dsh-reminder-notify: settings route')
 }
 
+function registerPreviewRoute(ctx, getSettings) {
+  const web = typeof ctx.get === 'function' ? ctx.get('webServer') : undefined
+  if (web === undefined || web === null || typeof web.register !== 'function') {
+    ctx.logger?.warn?.('dsh-reminder-notify: webServer is unavailable, the preview buttons stay hidden')
+    return
+  }
+  const reply = (res, status, payload) => {
+    res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+    res.end(JSON.stringify(payload))
+  }
+  const route = {
+    kind: 'exact',
+    path: PREVIEW_ROUTE,
+    handler: async (req, res) => {
+      try {
+        if ((req.method ?? 'GET').toUpperCase() !== 'POST') {
+          return reply(res, 405, { ok: false, error: 'use POST' })
+        }
+        const body = await readJsonBody(req)
+        const kind = str(body?.kind, 'done')
+        if (!['done', 'decide', 'raw'].includes(kind)) {
+          return reply(res, 400, { ok: false, error: `unknown kind: ${kind}` })
+        }
+        const result = await previewAudio(kind, getSettings())
+        if (result.ok) return reply(res, 200, result)
+        const status = result.error === 'no-audio' || result.error === 'audio-not-found' ? 400 : 500
+        return reply(res, status, result)
+      } catch (error) {
+        return reply(res, 500, { ok: false, error: String(error?.message ?? error) })
+      }
+    },
+  }
+  ctx.effect(() => {
+    const dispose = web.register(route)
+    return () => {
+      if (typeof dispose === 'function') dispose()
+    }
+  }, 'dsh-reminder-notify: preview route')
+}
+
 export function apply(ctx, config) {
   registerAudioRoute(ctx, () => settingsOf(config))
   registerConfigRoute(ctx, () => settingsOf(config))
+  registerPreviewRoute(ctx, () => settingsOf(config))
   const tools = typeof ctx.get === 'function' ? ctx.get('tools') : ctx.tools
   if (tools === undefined || tools === null || typeof tools.register !== 'function') {
     ctx.logger?.warn?.('dsh-reminder-notify: tools service is unavailable, notify_user was not registered')
