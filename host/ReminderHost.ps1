@@ -245,14 +245,26 @@ $form.Add_Click({
 })
 
 # ---- 声音（异步，窗口先出） -------------------------------------------------
+# wav 用 SoundPlayer（零依赖、异步）；其余格式（mp3/wma…）走 Windows Media Player COM。
+# ogg 是否可播取决于系统是否装了对应解码器，播不了只记日志、不影响弹卡。
 $script:player = $null
+$script:wmp = $null
 if (-not $NoSound -and -not [string]::IsNullOrEmpty($Audio) -and (Test-Path -LiteralPath $Audio)) {
+    $ext = [System.IO.Path]::GetExtension($Audio).ToLowerInvariant()
     try {
-        $script:player = New-Object System.Media.SoundPlayer $Audio
-        $script:player.Play()
-        Write-Log ('audio ' + $Audio)
+        if ($ext -eq '.wav') {
+            $script:player = New-Object System.Media.SoundPlayer $Audio
+            $script:player.Play()
+            Write-Log ('audio wav ' + $Audio)
+        } else {
+            $script:wmp = New-Object -ComObject WMPlayer.OCX
+            $script:wmp.settings.volume = 100
+            $script:wmp.URL = $Audio
+            $script:wmp.controls.play()
+            Write-Log ('audio media ' + $ext + ' ' + $Audio)
+        }
     } catch {
-        Write-Log ('audio-failed ' + $_.Exception.Message)
+        Write-Log ('audio-failed ' + $ext + ' ' + $_.Exception.Message)
     }
 }
 
@@ -264,6 +276,10 @@ $timer.Start()
 [System.Windows.Forms.Application]::Run()
 
 if ($script:player -ne $null) { $script:player.Dispose() }
+if ($script:wmp -ne $null) {
+    try { $script:wmp.controls.stop(); $script:wmp.close() } catch { }
+    try { [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($script:wmp) } catch { }
+}
 $titleFont.Dispose()
 $bodyFont.Dispose()
 $hintFont.Dispose()
