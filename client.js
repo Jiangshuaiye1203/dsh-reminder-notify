@@ -19,6 +19,7 @@ window.__ModuleLoader__.load({
     const CONFIG_ROUTE = '/dsh-reminder-notify/config'
     const AUDIO_KEYS = ['doneAudio', 'decideAudio', 'rawAudio']
     const PREVIEW_ROUTE = '/dsh-reminder-notify/preview'
+    const BALANCE_ROUTE = '/dsh-reminder-notify/balance'
     // 下拉按扩展名分组：wav 一组、mp3 一组……组内按文件名排序，一眼能看出格式。
     function groupAudioFiles(files) {
       const byExt = new Map()
@@ -44,6 +45,7 @@ window.__ModuleLoader__.load({
       groupBasic: '基本',
       groupAudio: '提示音',
       groupLook: '外观',
+      groupBalance: 'DeepSeek 余额',
       groupHost: '宿主与路径',
       seconds: '停留秒数',
       secondsHint: '2–600 秒，到点自动关闭。',
@@ -98,6 +100,28 @@ window.__ModuleLoader__.load({
       hostModeExe: '外部 exe 客户端',
       scriptPath: '脚本宿主路径',
       scriptPathHint: '留空 = 插件自带的 host/ReminderHost.ps1。',
+      balanceEnabled: '启用余额提醒',
+      balanceHint: '定期查 DeepSeek 账户余额，跌破阈值时弹卡片并语音播报（用本机已登录的 DSH 账号，不需要 API key）。',
+      balanceThresholds: '余额阈值（百分比，逗号分隔）',
+      balanceThresholdsHint: '相对于「基线」的百分比，例如 20,10,5：剩 20%、10%、5% 各提醒一次，不重复报。',
+      balanceCheckMinutes: '检查间隔（分钟）',
+      balanceCheckHint: '5–1440 分钟；余额检查不会很频繁，避免打扰账号服务。',
+      balanceSpeak: '语音播报余额',
+      balanceSpeakHint: '勾上后除了弹卡还会念出来；关闭则只弹卡片。',
+      balanceStatus: '当前余额',
+      balanceQuery: '立即查询',
+      balanceQuerying: '查询中…',
+      balanceReset: '把当前余额设为基线',
+      balanceUnknown: '还没查过余额',
+      balanceBaseline: '基线',
+      balanceBonus: '赠送金',
+      balanceBaselineAuto: '自动',
+      balanceBaselineManual: '手动',
+      balanceBaselineHint: '基线只认「充值余额」，赠送金不算；换账号会自动重来，刚充值后的 30 分钟内不播报，连续两次查到低于阈值才响。',
+      balanceAccountUnavailable: '这台机器的宿主没提供账号服务，查不到余额。',
+      balanceSignedOut: 'DSH 还没登录 DeepSeek 账号，查不到余额。',
+      balanceUnavailable: '账号服务暂时拿不到余额。',
+      balanceNoWallet: '账号里没有人民币（CNY）钱包。',
       powershellPath: 'PowerShell 可执行文件',
       clientDir: '客户端目录（仅 exe 模式）',
       empty: '（留空用默认）',
@@ -126,6 +150,7 @@ window.__ModuleLoader__.load({
       groupBasic: 'Basics',
       groupAudio: 'Sounds',
       groupLook: 'Appearance',
+      groupBalance: 'DeepSeek balance',
       groupHost: 'Host and paths',
       seconds: 'Duration (seconds)',
       secondsHint: '2–600 seconds, then it closes itself.',
@@ -180,6 +205,28 @@ window.__ModuleLoader__.load({
       hostModeExe: 'External exe client',
       scriptPath: 'Script host path',
       scriptPathHint: 'Empty uses the bundled host/ReminderHost.ps1.',
+      balanceEnabled: 'Balance alerts',
+      balanceHint: 'Polls your DeepSeek balance and alerts when it drops below a share of the baseline. Uses the signed-in DSH account, no API key needed.',
+      balanceThresholds: 'Thresholds (% of baseline, comma separated)',
+      balanceThresholdsHint: 'Relative to the baseline, e.g. 20,10,5 alerts at 20%, 10% and 5% once each.',
+      balanceCheckMinutes: 'Check interval (minutes)',
+      balanceCheckHint: '5–1440 minutes; keep it polite to the account service.',
+      balanceSpeak: 'Speak the balance',
+      balanceSpeakHint: 'Reads the number aloud in addition to the card.',
+      balanceStatus: 'Current balance',
+      balanceQuery: 'Check now',
+      balanceQuerying: 'Checking…',
+      balanceReset: 'Set current balance as baseline',
+      balanceUnknown: 'Not checked yet',
+      balanceBaseline: 'baseline',
+      balanceBonus: 'bonus',
+      balanceBaselineAuto: 'auto',
+      balanceBaselineManual: 'manual',
+      balanceBaselineHint: 'The baseline counts the recharge wallet only (bonus credit excluded). It resets when the account changes, stays quiet for 30 minutes after a top-up, and needs two consecutive readings below a threshold.',
+      balanceAccountUnavailable: 'The account service is unavailable on this host.',
+      balanceSignedOut: 'DSH is not signed in to a DeepSeek account.',
+      balanceUnavailable: 'The balance is temporarily unavailable.',
+      balanceNoWallet: 'No CNY wallet on this account.',
       powershellPath: 'PowerShell executable',
       clientDir: 'Client directory (exe mode)',
       empty: '(empty uses the default)',
@@ -254,6 +301,10 @@ window.__ModuleLoader__.load({
       { key: 'decideMessageTemplate', group: 'look', kind: 'text' },
       { key: 'rawTitleTemplate', group: 'look', kind: 'text' },
       { key: 'rawMessageTemplate', group: 'look', kind: 'text' },
+      { key: 'balanceEnabled', group: 'balance', kind: 'boolean' },
+      { key: 'balanceThresholds', group: 'balance', kind: 'text' },
+      { key: 'balanceCheckMinutes', group: 'balance', kind: 'number' },
+      { key: 'balanceSpeak', group: 'balance', kind: 'boolean' },
       { key: 'hostMode', group: 'host', kind: 'select', options: ['script', 'exe'], optionLabels: ['hostModeScript', 'hostModeExe'] },
       { key: 'scriptPath', group: 'host', kind: 'text' },
       { key: 'powershellPath', group: 'host', kind: 'text' },
@@ -283,10 +334,14 @@ window.__ModuleLoader__.load({
       rawTitleTemplate: 'perKindTemplateHint',
       rawMessageTemplate: 'perKindTemplateHint',
       scriptPath: 'scriptPathHint',
+      balanceEnabled: 'balanceHint',
+      balanceThresholds: 'balanceThresholdsHint',
+      balanceCheckMinutes: 'balanceCheckHint',
+      balanceSpeak: 'balanceSpeakHint',
     }
 
-    const GROUPS = ['basic', 'audio', 'look', 'host']
-    const GROUP_LABELS = { basic: 'groupBasic', audio: 'groupAudio', look: 'groupLook', host: 'groupHost' }
+    const GROUPS = ['basic', 'audio', 'look', 'balance', 'host']
+    const GROUP_LABELS = { basic: 'groupBasic', audio: 'groupAudio', look: 'groupLook', balance: 'groupBalance', host: 'groupHost' }
 
     function sameValue(a, b) {
       return JSON.stringify(a) === JSON.stringify(b)
@@ -306,6 +361,8 @@ window.__ModuleLoader__.load({
       const [previewing, setPreviewing] = React.useState(null)
       const [message, setMessage] = React.useState(null)
       const [audio, setAudio] = React.useState({ dir: '', files: [], error: null })
+      const [balance, setBalance] = React.useState(null)
+      const [balanceBusy, setBalanceBusy] = React.useState(false)
 
       React.useEffect(() => {
         if (typeof fetch !== 'function') {
@@ -361,6 +418,11 @@ window.__ModuleLoader__.load({
           cancelled = true
         }
       }, [scanDir])
+
+      // 打开面板时读一次余额快照（不触发提醒，只是显示）。
+      React.useEffect(() => {
+        refreshBalance()
+      }, [])
 
       if (props.view === 'summary') {
         const tr = typeof t === 'function' ? t : (key) => key
@@ -501,6 +563,81 @@ window.__ModuleLoader__.load({
           })
       }
 
+      // 余额：数字与「立即查询 / 重置基线」都走同一个路由（宿主侧问账号服务）。
+      function shortTime(ms) {
+        const n = Number(ms)
+        if (!Number.isFinite(n) || n <= 0) return ''
+        const d = new Date(n)
+        const pad = (v) => (v < 10 ? '0' + v : String(v))
+        return pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes())
+      }
+
+      function balanceText() {
+        const label = typeof t === 'function' ? t : (key) => key
+        if (balance === null) return label('balanceUnknown')
+        if (balance.ok === false) {
+          const reasons = {
+            'account-unavailable': label('balanceAccountUnavailable'),
+            'signed-out': label('balanceSignedOut'),
+            'balance-unavailable': label('balanceUnavailable'),
+            'no-cny-wallet': label('balanceNoWallet'),
+          }
+          return (reasons[balance.error] || String(balance.error || ''))
+        }
+        if (balance.balance === null || balance.balance === undefined) return label('balanceUnknown')
+        const parts = ['¥' + Number(balance.balance).toFixed(2)]
+        if (balance.pct !== null && balance.pct !== undefined) parts.push('（' + balance.pct + '%）')
+        if (balance.baseline) {
+          const source =
+            balance.baselineSource === 'manual'
+              ? label('balanceBaselineManual')
+              : balance.baselineSource === 'auto'
+                ? label('balanceBaselineAuto')
+                : ''
+          const at = shortTime(balance.baselineAt)
+          const tail = [source, at].filter(Boolean).join(' · ')
+          parts.push(' · ' + label('balanceBaseline') + ' ¥' + Number(balance.baseline).toFixed(2) + (tail ? '（' + tail + '）' : ''))
+        }
+        if (Number(balance.bonus) > 0) {
+          parts.push(' · ' + label('balanceBonus') + ' ¥' + Number(balance.bonus).toFixed(2))
+        }
+        return parts.join('')
+      }
+
+      function applyBalance(payload) {
+        if (payload && typeof payload === 'object') setBalance(payload)
+      }
+
+      function balanceFetch(options) {
+        setBalanceBusy(true)
+        Promise.resolve()
+          .then(() => fetch(BALANCE_ROUTE, options))
+          .then((response) => {
+            const body = response && typeof response.json === 'function' ? response.json() : Promise.resolve(null)
+            return Promise.resolve(body).catch(() => null)
+          })
+          .then((data) => {
+            setBalanceBusy(false)
+            if (data && typeof data === 'object') applyBalance(data)
+          })
+          .catch((error) => {
+            setBalanceBusy(false)
+            setBalance({ ok: false, error: String((error && error.message) || error) })
+          })
+      }
+
+      function refreshBalance() {
+        balanceFetch({ headers: { accept: 'application/json' } })
+      }
+
+      function queryBalance() {
+        balanceFetch({ method: 'POST', headers: { 'content-type': 'application/json', accept: 'application/json' }, body: '{}' })
+      }
+
+      function resetBalance() {
+        balanceFetch({ method: 'POST', headers: { 'content-type': 'application/json', accept: 'application/json' }, body: JSON.stringify({ mode: 'reset' }) })
+      }
+
       function control(field) {
         const value = effective[field.key]
         const disabled = !writable || busy
@@ -591,28 +728,60 @@ window.__ModuleLoader__.load({
         return input
       }
 
-      const groups = GROUPS.map((group) =>
-        h(
-          'div',
-          { className: 'drn-group', key: group },
-          h('div', { className: 'drn-group-title' }, typeof t === 'function' ? t(GROUP_LABELS[group]) : group),
-          FIELDS.filter((field) => field.group === group).map((field) =>
+      const groups = GROUPS.map((group) => {
+        const rows = FIELDS.filter((field) => field.group === group).map((field) =>
+          h(
+            'div',
+            { className: 'drn-row', key: field.key },
             h(
               'div',
-              { className: 'drn-row', key: field.key },
+              { className: 'drn-row-main' },
+              h('div', { className: 'drn-label' }, typeof t === 'function' ? t(field.key) : field.key),
+              HINTS[field.key] && typeof t === 'function'
+                ? h('div', { className: 'drn-hint' }, t(HINTS[field.key]))
+                : null,
+            ),
+            h('div', { className: 'drn-control' }, control(field)),
+          ),
+        )
+        if (group === 'balance') {
+          rows.push(
+            h(
+              'div',
+              { className: 'drn-row', key: 'balance-status' },
               h(
                 'div',
                 { className: 'drn-row-main' },
-                h('div', { className: 'drn-label' }, typeof t === 'function' ? t(field.key) : field.key),
-                HINTS[field.key] && typeof t === 'function'
-                  ? h('div', { className: 'drn-hint' }, t(HINTS[field.key]))
+                h('div', { className: 'drn-label' }, typeof t === 'function' ? t('balanceStatus') : 'DeepSeek balance'),
+                h('div', { className: 'drn-hint' }, balanceText()),
+                typeof t === 'function'
+                  ? h('div', { className: 'drn-hint drn-balance-rule' }, t('balanceBaselineHint'))
                   : null,
               ),
-              h('div', { className: 'drn-control' }, control(field)),
+              h(
+                'div',
+                { className: 'drn-pick' },
+                h(
+                  'button',
+                  { type: 'button', className: 'drn-btn small', disabled: balanceBusy, onClick: queryBalance },
+                  typeof t === 'function' ? t(balanceBusy ? 'balanceQuerying' : 'balanceQuery') : 'Check now',
+                ),
+                h(
+                  'button',
+                  { type: 'button', className: 'drn-btn small', disabled: balanceBusy, onClick: resetBalance },
+                  typeof t === 'function' ? t('balanceReset') : 'Reset baseline',
+                ),
+              ),
             ),
-          ),
-        ),
-      )
+          )
+        }
+        return h(
+          'div',
+          { className: 'drn-group', key: group },
+          h('div', { className: 'drn-group-title' }, typeof t === 'function' ? t(GROUP_LABELS[group]) : group),
+          rows,
+        )
+      })
 
       return h(
         'div',

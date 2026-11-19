@@ -65,6 +65,15 @@ export const Config = z === null ? undefined : z.object({
   decideMessageTemplate: z.string().default('').description('decide 档位单独的正文模板，留空 = 用通用模板').volatile(),
   rawTitleTemplate: z.string().default('').description('raw 档位单独的标题模板，留空 = 用通用模板').volatile(),
   rawMessageTemplate: z.string().default('').description('raw 档位单独的正文模板，留空 = 用通用模板').volatile(),
+  balanceEnabled: z.boolean().default(false).description('DeepSeek 余额不足时弹卡提醒（用本机已登录的 DSH 账号查余额）').volatile(),
+  balanceBaseline: z.number().default(0).description('余额基线（充值后的余额）；0 = 自动记录见过的最高余额').volatile(),
+  balanceThresholds: z.string().default('20,10,5').description('触发阈值，按基线的百分比，逗号分隔（例如 20,10,5）').volatile(),
+  balanceSpeak: z.boolean().default(true).description('提醒时用系统语音读出余额').volatile(),
+  balanceCheckMinutes: z.number().min(5).max(1440).step(5).default(30).description('自动查余额的间隔（分钟）').volatile(),
+  balanceFired: z.number().default(0).description('内部状态：已经报过的最小阈值，余额回升后自动清零').volatile(),
+  balanceBaselineAt: z.number().default(0).description('内部状态：基线设定的时间（毫秒时间戳）').volatile(),
+  balanceBaselineAccount: z.string().default('').description('内部状态：基线属于哪个账号（平台用户 id），换号自动重来').volatile(),
+  balanceBaselineSource: z.string().default('').description('内部状态：基线来源（auto = 自动取余额，manual = 手动设定）').volatile(),
 })
 
 const PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)))
@@ -169,6 +178,15 @@ function settingsOf(config) {
     decideMessageTemplate: typeof c.decideMessageTemplate === 'string' ? c.decideMessageTemplate : '',
     rawTitleTemplate: typeof c.rawTitleTemplate === 'string' ? c.rawTitleTemplate : '',
     rawMessageTemplate: typeof c.rawMessageTemplate === 'string' ? c.rawMessageTemplate : '',
+    balanceEnabled: c.balanceEnabled === true,
+    balanceBaseline: Math.max(0, num(c.balanceBaseline, 0)),
+    balanceThresholds: typeof c.balanceThresholds === 'string' ? c.balanceThresholds : '20,10,5',
+    balanceSpeak: c.balanceSpeak !== false,
+    balanceCheckMinutes: Math.round(clamp(num(c.balanceCheckMinutes, 30), 5, 1440)),
+    balanceFired: Math.max(0, num(c.balanceFired, 0)),
+    balanceBaselineAt: Math.max(0, num(c.balanceBaselineAt, 0)),
+    balanceBaselineAccount: str(c.balanceBaselineAccount, ''),
+    balanceBaselineSource: str(c.balanceBaselineSource, ''),
   }
 }
 
@@ -348,17 +366,19 @@ async function notify(kind, args, settings) {
   }
   const audioDir = path.resolve(settings.audioDir)
   const audioPath = sound && audio !== '' ? path.join(audioDir, audio) : ''
+  const speak = str(args.speak, '')
   if (audioPath !== '' && !fs.existsSync(audioPath)) {
     // 音频缺失不该让提醒消失：退回静音，正文照常弹。
-    return await fireScript(settings, title, message, seconds, kind, '', false, scriptPath, audioPath)
+    return await fireScript(settings, title, message, seconds, kind, '', false, scriptPath, audioPath, speak)
   }
-  return await fireScript(settings, title, message, seconds, kind, audioPath, sound, scriptPath, '')
+  return await fireScript(settings, title, message, seconds, kind, audioPath, sound, scriptPath, '', speak)
 }
 
-async function fireScript(settings, title, message, seconds, kind, audioPath, sound, scriptPath, missingAudio) {
+async function fireScript(settings, title, message, seconds, kind, audioPath, sound, scriptPath, missingAudio, speak) {
   const extras = appearanceOf(kind, settings)
   const argv = argvOfScriptHost(title, message, seconds, settings.position, accentOf(kind, settings), audioPath, sound, extras)
   argv[argv.indexOf(null)] = scriptPath
+  if (typeof speak === 'string' && speak !== '') argv.push('-Speak', psSafe(speak))
   try {
     const { pid, exited } = await launch(settings.powershellPath, argv, PACKAGE_ROOT)
     // Add-Type 编译 C# 需要几百毫秒，所以等 900ms 才能发现「参数错、起不来」的情况。
@@ -436,6 +456,7 @@ const AUDIO_EXTENSIONS = ['.wav', '.mp3', '.ogg', '.m4a', '.flac', '.aac', '.wma
 const AUDIO_ROUTE = '/dsh-reminder-notify/audio'
 const CONFIG_ROUTE = '/dsh-reminder-notify/config'
 const PREVIEW_ROUTE = '/dsh-reminder-notify/preview'
+const BALANCE_ROUTE = '/dsh-reminder-notify/balance'
 
 // 面板要「把音频目录里的文件列成下拉」，但 Client 侧没有任何读文件能力，
 // 所以由 Host 注册一条只读的 GET 路由，页面用同源 fetch 取这个 JSON。
@@ -644,10 +665,289 @@ function registerPreviewRoute(ctx, getSettings) {
   }, 'dsh-reminder-notify: preview route')
 }
 
+// ——— DeepSeek 余额提醒 ——————————————————————————————————————————————
+//
+// 数据来自宿主账号服务 deepseekAccount.getBalance()：返回的是钱包余额
+// （AccountWallet = { currency, balance: string }），走本机已登录的 DSH 账号，
+// 不需要用户另外填 API key。
+//
+// 「剩 20%」得有个分母：分母就是「基线」——最近一次充值后的余额。插件自己维护它：
+// 余额比基线还高（说明刚充过值）就把基线抬到当前余额，并清空已报阈值；
+// 余额跌到 基线×阈值% 以下就报一次，报过的阈值不再重复报。
+//
+// 基线口径（0.10.1 起）：
+//   - 只算「充值钱包」（AccountWallet.value），赠送金（bonusWallets）不参与，
+//     否则赠送金到期清零会让总余额断崖式下跌，触发假警报；
+//   - 基线连带记录账号 id 与设定时间：换账号自动重来，刚抬升的 30 分钟内不播报，
+//     避免「充值入账 → 服务端冲正」这类抖动误报；
+//   - 播报前会立刻再读一次余额做确认（连续两次采样都在阈值以下才响）。
+const balanceState = { balance: null, bonus: null, currency: 'CNY', at: 0, pct: null, error: null }
+const BALANCE_COOLDOWN_MS = 30 * 60 * 1000
+
+export function parseThresholds(text) {
+  const list = String(text ?? '')
+    .split(/[,，\s]+/)
+    .map((part) => Number(part))
+    .filter((n) => Number.isFinite(n) && n > 0 && n <= 100)
+  const unique = [...new Set(list)].sort((a, b) => b - a)
+  return unique.length > 0 ? unique : [20, 10, 5]
+}
+
+// 从账号服务读余额；返回 { balance, bonus, currency, accountId } 或 { error }。
+// balance 只算充值钱包；bonus 是赠送钱包（只展示，不参与百分比）。
+async function readAccountBalance(ctx) {
+  const account = typeof ctx.get === 'function' ? ctx.get('deepseekAccount') : undefined
+  if (account === undefined || account === null || typeof account.getBalance !== 'function') {
+    return { error: 'account-unavailable' }
+  }
+  const meta = {
+    version: '0.10.1',
+    locale: 'zh-CN',
+    timezoneOffsetSeconds: -new Date().getTimezoneOffset() * 60,
+  }
+  const result = await account.getBalance(meta)
+  if (result === null || result === undefined) return { error: 'signed-out' }
+  if (result.status !== 'ready') return { error: 'balance-unavailable' }
+  const sumOf = (wallets) =>
+    Math.round(
+      (wallets ?? [])
+        .filter((wallet) => wallet && wallet.currency === 'CNY')
+        .reduce((sum, wallet) => sum + num(wallet.balance, 0), 0) * 100,
+    ) / 100
+  const rechargeWallets = (result.value ?? []).filter((wallet) => wallet && wallet.currency === 'CNY')
+  if (rechargeWallets.length === 0) return { error: 'no-cny-wallet' }
+  const balance = sumOf(result.value)
+  const bonus = sumOf(result.bonusWallets)
+  // 账号身份：用来判断「是不是换号了」，读不到就留空（不影响余额判断）。
+  let accountId = ''
+  if (typeof account.getProfile === 'function') {
+    try {
+      const profile = await account.getProfile(meta)
+      if (profile !== null && profile !== undefined && profile.status === 'ready' && profile.value) {
+        accountId = String(profile.value.id ?? '')
+      }
+    } catch {
+      accountId = ''
+    }
+  }
+  return { balance, bonus, currency: 'CNY', accountId }
+}
+
+// 写回状态（基线和已报阈值）：都是 volatile 字段，写完立刻生效，不会重启插件。
+async function saveBalanceState(ctx, patch) {
+  const entry = ctx.fiber?.entry
+  const editor = typeof ctx.get === 'function' ? ctx.get('configEditor') : undefined
+  if (entry === undefined || editor === undefined || typeof editor.edit !== 'function') return false
+  try {
+    await editor.edit(entry, (current) => ({ ...current, ...patch }))
+    return true
+  } catch {
+    return false
+  }
+}
+
+// 查一次余额，必要时弹卡；force=true 时忽略冷却也会回报状态（供面板显示）。
+export async function checkBalance(ctx, getSettings, { force = false } = {}) {
+  const settings = getSettings()
+  const read = await readAccountBalance(ctx)
+  if (read.error !== undefined) {
+    // 读不到（没登录 / 接口失败）时保留上次快照，绝不当成 0，避免「余额只剩 0 元」的误报。
+    balanceState.error = read.error
+    balanceState.at = Date.now()
+    return { ok: false, error: read.error, enabled: settings.balanceEnabled }
+  }
+  const balance = read.balance
+  const thresholds = parseThresholds(settings.balanceThresholds)
+  const now = Date.now()
+  const patch = {}
+  let baseline = settings.balanceBaseline
+  let fired = settings.balanceFired
+  let baselineAt = settings.balanceBaselineAt
+  let baselineAccount = settings.balanceBaselineAccount
+  let baselineSource = settings.balanceBaselineSource
+
+  // 换账号 → 旧基线作废（A 账号的 100 元基线套到 B 账号的 5 元上会立刻误报）。
+  if (read.accountId !== '' && baselineAccount !== '' && read.accountId !== baselineAccount) {
+    baseline = 0
+    baselineAt = 0
+    patch.balanceBaselineAt = 0
+    if (fired !== 0) {
+      fired = 0
+      patch.balanceFired = 0
+    }
+  }
+
+  // 充值（余额高于基线）或首次运行 → 基线抬到当前余额，并清空已报阈值。
+  if (baseline <= 0 || balance > baseline) {
+    baseline = balance
+    baselineAt = now
+    baselineSource = 'auto'
+    baselineAccount = read.accountId || baselineAccount
+    patch.balanceBaseline = baseline
+    patch.balanceBaselineAt = baselineAt
+    patch.balanceBaselineAccount = baselineAccount
+    patch.balanceBaselineSource = baselineSource
+    if (fired !== 0) {
+      fired = 0
+      patch.balanceFired = 0
+    }
+  }
+
+  const pct = baseline > 0 ? (balance / baseline) * 100 : 100
+  balanceState.balance = balance
+  balanceState.bonus = read.bonus
+  balanceState.currency = read.currency
+  balanceState.pct = Math.round(pct * 10) / 10
+  balanceState.at = now
+  balanceState.error = null
+
+  // 余额回到最高阈值以上 → 重新待命（下次跌破可以再报）。
+  const highest = thresholds[0]
+  if (pct > highest && fired !== 0) {
+    fired = 0
+    patch.balanceFired = 0
+  }
+
+  let firedNow = 0
+  const cooling = baselineAt > 0 && now - baselineAt < BALANCE_COOLDOWN_MS
+  if (settings.balanceEnabled && (!cooling || force)) {
+    // 只报「新跨过的最深一档」：20 → 10 → 5 各报一次，不会一次堆三张卡。
+    const crossed = thresholds.find((t) => pct <= t && t < fired) ?? thresholds.find((t) => pct <= t && fired === 0)
+    if (crossed !== undefined && crossed > 0) {
+      // 连续两次采样确认：立刻再读一次，两次都在阈值以下才播报。
+      const confirm = await readAccountBalance(ctx)
+      const confirmPct =
+        confirm.error === undefined && baseline > 0 ? (confirm.balance / baseline) * 100 : null
+      const confirmed = confirmPct !== null && confirmPct <= crossed
+      if (confirmed) {
+        firedNow = crossed
+        fired = crossed
+        patch.balanceFired = crossed
+        const message = `DeepSeek 余额只剩 ¥${balance.toFixed(2)}（约基线的 ${Math.round(pct)}%，已低于 ${crossed}%）`
+        const speak = settings.balanceSpeak ? `余额还剩 ${balance.toFixed(2)} 元，已经不足百分之 ${crossed}` : ''
+        try {
+          await notify('raw', { title: 'DeepSeek 余额不足', message, seconds: 20, speak }, settings)
+        } catch {
+          // 提醒失败不影响余额检查本身
+        }
+      }
+    }
+  }
+  if (Object.keys(patch).length > 0) await saveBalanceState(ctx, patch)
+  return {
+    ok: true,
+    enabled: settings.balanceEnabled,
+    balance,
+    bonus: read.bonus,
+    currency: read.currency,
+    baseline,
+    baselineAt,
+    baselineSource,
+    cooling,
+    pct: balanceState.pct,
+    thresholds,
+    fired,
+    firedNow: firedNow > 0 ? firedNow : null,
+    forced: force,
+  }
+}
+
+function registerBalanceRoute(ctx, getSettings, config) {
+  const web = typeof ctx.get === 'function' ? ctx.get('webServer') : undefined
+  const replyOf = (res) => (status, payload) => {
+    res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+    res.end(JSON.stringify(payload))
+  }
+  const settingsNow = () => getSettings()
+  const snapshot = () => ({
+    ok: balanceState.error === null,
+    enabled: settingsNow().balanceEnabled,
+    balance: balanceState.balance,
+    bonus: balanceState.bonus,
+    currency: balanceState.currency,
+    baseline: settingsNow().balanceBaseline,
+    baselineAt: settingsNow().balanceBaselineAt,
+    baselineSource: settingsNow().balanceBaselineSource,
+    pct: balanceState.pct,
+    at: balanceState.at,
+    error: balanceState.error,
+  })
+  if (web !== undefined && web !== null && typeof web.register === 'function') {
+    const route = {
+      kind: 'exact',
+      path: BALANCE_ROUTE,
+      handler: async (req, res) => {
+        const reply = replyOf(res)
+        try {
+          const method = (req.method ?? 'GET').toUpperCase()
+          if (method === 'GET') return reply(200, snapshot())
+          if (method !== 'POST') return reply(405, { ok: false, error: 'use GET or POST' })
+          const body = await readJsonBody(req)
+          if (body !== null && typeof body === 'object' && body.mode === 'reset') {
+            // 「把当前余额设为基线」：读一次当前余额，直接写成人设定的基线。
+            const entry = ctx.fiber?.entry
+            const editor = typeof ctx.get === 'function' ? ctx.get('configEditor') : undefined
+            const read = await readAccountBalance(ctx)
+            if (entry === undefined || editor?.edit === undefined) {
+              return reply(409, { ok: false, error: 'configuration cannot be saved in this profile' })
+            }
+            if (read.error !== undefined) return reply(400, { ok: false, error: read.error })
+            const now = Date.now()
+            await editor.edit(entry, (current) => ({
+              ...current,
+              balanceBaseline: read.balance,
+              balanceBaselineAt: now,
+              balanceBaselineAccount: read.accountId || '',
+              balanceBaselineSource: 'manual',
+              balanceFired: 0,
+            }))
+            balanceState.balance = read.balance
+            balanceState.bonus = read.bonus
+            balanceState.pct = 100
+            balanceState.error = null
+            balanceState.at = now
+            return reply(200, { ...snapshot(), reset: true, baseline: read.balance })
+          }
+          const result = await checkBalance(ctx, getSettings, { force: true })
+          return reply(200, result)
+        } catch (error) {
+          return reply(500, { ok: false, error: String(error?.message ?? error) })
+        }
+      },
+    }
+    ctx.effect(() => {
+      const dispose = web.register(route)
+      return () => {
+        if (typeof dispose === 'function') dispose()
+      }
+    }, 'dsh-reminder-notify: balance route')
+  } else {
+    ctx.logger?.warn?.('dsh-reminder-notify: webServer is unavailable, the balance card stays read-only')
+  }
+
+  // 自动检查：每 60 秒醒一次，按 balanceCheckMinutes 的间隔真正查一次。
+  // config 是 volatile，改完立刻生效，所以这里每次都用 getSettings() 现读。
+  // 这里用全局定时器而不是 ctx.setInterval —— 后者要求插件 inject 'timer'，
+  // 而本插件故意保持「只 inject tools」的低依赖，卸载时靠 ctx.effect 收尾。
+  let lastCheck = 0
+  const timer = setInterval(() => {
+    const settings = getSettings()
+    if (!settings.balanceEnabled) return
+    const gap = Math.max(1, settings.balanceCheckMinutes) * 60 * 1000
+    if (Date.now() - lastCheck < gap) return
+    lastCheck = Date.now()
+    checkBalance(ctx, getSettings).catch(() => {})
+  }, 60 * 1000)
+  if (typeof timer?.unref === 'function') timer.unref()
+  ctx.effect(() => () => clearInterval(timer), 'dsh-reminder-notify: balance watcher')
+  void config
+}
+
 export function apply(ctx, config) {
   registerAudioRoute(ctx, () => settingsOf(config))
   registerConfigRoute(ctx, () => settingsOf(config))
   registerPreviewRoute(ctx, () => settingsOf(config))
+  registerBalanceRoute(ctx, () => settingsOf(config), config)
   const tools = typeof ctx.get === 'function' ? ctx.get('tools') : ctx.tools
   if (tools === undefined || tools === null || typeof tools.register !== 'function') {
     ctx.logger?.warn?.('dsh-reminder-notify: tools service is unavailable, notify_user was not registered')

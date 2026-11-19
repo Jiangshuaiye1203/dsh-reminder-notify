@@ -1,6 +1,6 @@
 // 自检：不启动 DSH，用假 ctx 把插件当普通模块跑一遍，真的弹一次提醒。
 import { fileURLToPath } from 'node:url'
-import { apply, listAudioFiles, previewAudio } from './index.js'
+import { apply, checkBalance, listAudioFiles, parseThresholds, previewAudio } from './index.js'
 
 let captured
 function makeCtx(sink) {
@@ -136,3 +136,122 @@ if (missingAudio.ok !== false || missingAudio.error !== 'no-audio') throw new Er
 const absentAudio = await previewAudio('done', { audioDir: fileURLToPath(new URL('./assets/提示音导入', import.meta.url)), doneAudio: '不存在.wav' })
 if (absentAudio.ok !== false || absentAudio.error !== 'audio-not-found') throw new Error('缺失文件应该返回 audio-not-found：' + JSON.stringify(absentAudio))
 console.log('preview ok', missingAudio.error, '|', absentAudio.error)
+
+
+// 余额提醒：阈值解析 + 基线自动抬高 + 未启用时不提醒。
+const th = parseThresholds('15，5, 15,abc')
+if (JSON.stringify(th) !== '[15,5]') throw new Error('parseThresholds 结果不对：' + JSON.stringify(th))
+if (JSON.stringify(parseThresholds('')) !== '[20,10,5]') throw new Error('parseThresholds 空值应回落到默认阈值')
+
+const edits = []
+function makeBalanceCtx(balances, { bonus = 0, accountId = 'user-a' } = {}) {
+  const queue = Array.isArray(balances) ? [...balances] : [balances]
+  const next = () => (queue.length > 1 ? queue.shift() : queue[0])
+  return {
+    get(name) {
+      if (name === 'deepseekAccount') {
+        return {
+          getBalance: async () => ({
+            status: 'ready',
+            value: [{ currency: 'CNY', balance: String(next()) }],
+            bonusWallets: bonus > 0 ? [{ currency: 'CNY', balance: String(bonus) }] : [],
+          }),
+          getProfile: async () => ({ status: 'ready', value: { id: accountId } }),
+        }
+      }
+      if (name === 'configEditor') {
+        return {
+          edit: async (_entry, fn) => {
+            edits.push(
+              fn({
+                balanceBaseline: balanceSettings.balanceBaseline,
+                balanceBaselineAt: balanceSettings.balanceBaselineAt,
+                balanceBaselineAccount: balanceSettings.balanceBaselineAccount,
+                balanceBaselineSource: balanceSettings.balanceBaselineSource,
+                balanceFired: balanceSettings.balanceFired,
+              }),
+            )
+          },
+        }
+      }
+      return undefined
+    },
+    fiber: { entry: {} },
+    logger: console,
+  }
+}
+
+const baseSettings = {
+  balanceEnabled: false,
+  balanceBaseline: 100,
+  balanceThresholds: '20,10,5',
+  balanceSpeak: false,
+  balanceCheckMinutes: 30,
+  balanceFired: 0,
+  balanceBaselineAt: 0,
+  balanceBaselineAccount: 'user-a',
+  balanceBaselineSource: 'auto',
+}
+let balanceSettings = { ...baseSettings }
+
+// 余额比基线高 → 抬基线、清空已报阈值，且不弹卡（enabled=false）。
+balanceSettings = { ...baseSettings }
+edits.length = 0
+const raised = await checkBalance(makeBalanceCtx(150), () => balanceSettings)
+if (raised.baseline !== 150) throw new Error('余额高于基线时应抬基线：' + JSON.stringify(raised))
+if (edits.length === 0 || edits[0].balanceBaseline !== 150) throw new Error('抬基线没有写回配置：' + JSON.stringify(edits))
+if (raised.pct !== 100) throw new Error('抬基线后百分比应为 100：' + raised.pct)
+
+// 赠送金不参与基线（充值钱包 100 + 赠送 50 时，余额仍是 100，赠送只展示）。
+balanceSettings = { ...baseSettings }
+edits.length = 0
+const withBonus = await checkBalance(makeBalanceCtx(100, { bonus: 50 }), () => balanceSettings)
+if (withBonus.balance !== 100) throw new Error('赠送金不该并进余额：' + JSON.stringify(withBonus))
+if (withBonus.bonus !== 50) throw new Error('赠送金应单独返回：' + JSON.stringify(withBonus))
+
+// 换账号 → 旧基线作废，新基线取当前余额。
+balanceSettings = { ...baseSettings }
+edits.length = 0
+const switched = await checkBalance(makeBalanceCtx(60, { accountId: 'user-b' }), () => balanceSettings)
+if (switched.baseline !== 60) throw new Error('换账号后基线应重置为当前余额：' + JSON.stringify(switched))
+
+// 跌破阈值但没启用 → 只算比例，不弹卡、不改 fired。
+balanceSettings = { ...baseSettings }
+edits.length = 0
+const quiet = await checkBalance(makeBalanceCtx(8), () => balanceSettings)
+if (quiet.pct !== 8) throw new Error('8/100 应算出 8%：' + quiet.pct)
+if (quiet.firedNow !== null) throw new Error('未启用余额提醒时不该报：' + JSON.stringify(quiet))
+
+// 刚抬升基线（30 分钟冷却内）→ 即使跌破阈值也不播报。
+balanceSettings = { ...baseSettings, balanceEnabled: true, balanceBaselineAt: Date.now() }
+edits.length = 0
+const cooling = await checkBalance(makeBalanceCtx(8), () => balanceSettings)
+if (cooling.firedNow !== null) throw new Error('冷却期内不该播报：' + JSON.stringify(cooling))
+if (cooling.cooling !== true) throw new Error('应标记 cooling：' + JSON.stringify(cooling))
+
+// 冷却已过 + 连续两次采样都在阈值下 → 播报最深一档。
+balanceSettings = { ...baseSettings, balanceEnabled: true, balanceBaselineAt: Date.now() - 31 * 60 * 1000 }
+edits.length = 0
+const fired = await checkBalance(makeBalanceCtx([8, 8]), () => balanceSettings)
+if (fired.firedNow !== 20) throw new Error('两次采样都在阈下时应报 20%：' + JSON.stringify(fired))
+
+// 第一次在阈下、第二次回升 → 不播报（抖动降噪）。
+balanceSettings = { ...baseSettings, balanceEnabled: true, balanceBaselineAt: Date.now() - 31 * 60 * 1000 }
+edits.length = 0
+const bounced = await checkBalance(makeBalanceCtx([8, 30]), () => balanceSettings)
+if (bounced.firedNow !== null) throw new Error('第二次采样回升时不该播报：' + JSON.stringify(bounced))
+
+console.log(
+  'balance ok',
+  th.join('/'),
+  '| raise',
+  raised.baseline,
+  '| bonus',
+  withBonus.bonus,
+  '| switch',
+  switched.baseline,
+  '| pct',
+  quiet.pct,
+  '| fired',
+  fired.firedNow,
+)
