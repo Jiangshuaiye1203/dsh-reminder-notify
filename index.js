@@ -26,38 +26,45 @@ const z = await import('@deepseek-ai/schemastery')
 
 // 插件页的设置表单由这份 schema 渲染（client.js 再在上面做分组面板）。
 // 每一项的默认值与 settingsOf() 里的兜底一致：空字符串表示「用包内资源」。
+//
+// 为什么每个字段都要 .volatile()：宿主 settings.describe() 只把「可按热更新就地改动」
+// 的字段投影进 namespaces（volatileForm 会跳过没有 volatile 标记的字段），而插件页的
+// 设置面板只对 namespaces 里出现过的条目渲染 form。不标 volatile 的话面板会拿到
+// undefined 并显示「这个页面拿不到插件配置」。
+// 标了 volatile 还有个好处：改完立刻生效，不用重启插件 —— notify() 每次调用都会用
+// settingsOf(config) 现读，所以拿到的就是最新值。
 export const Config = z === null ? undefined : z.object({
-  hostMode: z.union(['script', 'exe']).default('script').description('宿主模式：script = 包内 PowerShell 脚本（默认），exe = 老的客户端 exe'),
-  scriptPath: z.string().default('').description('脚本宿主路径，留空 = 包内 host/ReminderHost.ps1'),
-  powershellPath: z.string().default('powershell.exe').description('调 PowerShell 用的可执行文件'),
-  clientDir: z.string().default('').description('exe 模式下的客户端目录，留空 = 包内 assets/'),
-  audioDir: z.string().default('').description('提示音目录，留空 = 包内 assets/提示音导入/'),
-  seconds: z.number().min(2).max(600).step(1).default(60).description('弹窗停留秒数（2–600）'),
-  position: z.union(['br', 'center', 'tr']).default('br').description('弹窗位置：br 右下、center 居中、tr 右上'),
-  sound: z.boolean().default(true).description('是否播放提示音'),
-  doneAudio: z.string().default('完成提醒语音.wav').description('done 档位的提示音文件名（wav / mp3，在提示音目录下）'),
-  decideAudio: z.string().default('需要你来决定.wav').description('decide 档位的提示音文件名（wav / mp3）'),
-  rawAudio: z.string().default('').description('raw 档位的提示音文件名（wav / mp3），留空 = 静音'),
-  accentDone: z.string().default('#2ECC71').description('done 档位卡片强调色（#RRGGBB）'),
-  accentDecide: z.string().default('#F5A623').description('decide 档位卡片强调色'),
-  accentRaw: z.string().default('#4C8DFF').description('raw 档位卡片强调色'),
-  cooldownMs: z.number().min(0).step(100).default(1500).description('同档位提醒的最小间隔（毫秒）'),
-  cardBackground: z.string().default('').description('卡片背景图路径（png / jpg），留空 = 纯色背景'),
-  cardIcon: z.string().default('').description('标题左侧的小图标路径（png / ico），留空 = 不显示'),
-  doneCardBackground: z.string().default('').description('done 档位单独用的背景图，留空 = 用上面的通用背景'),
-  decideCardBackground: z.string().default('').description('decide 档位单独用的背景图，留空 = 用通用背景'),
-  rawCardBackground: z.string().default('').description('raw 档位单独用的背景图，留空 = 用通用背景'),
-  doneCardIcon: z.string().default('').description('done 档位单独用的标题图标，留空 = 用通用图标'),
-  decideCardIcon: z.string().default('').description('decide 档位单独用的标题图标，留空 = 用通用图标'),
-  rawCardIcon: z.string().default('').description('raw 档位单独用的标题图标，留空 = 用通用图标'),
-  titleTemplate: z.string().default('{title}').description('标题模板，可用占位符 {title} {message} {kind} {time}'),
-  messageTemplate: z.string().default('{message}').description('正文模板，可用占位符 {title} {message} {kind} {time}'),
-  doneTitleTemplate: z.string().default('').description('done 档位单独的标题模板，留空 = 用上面的通用模板'),
-  doneMessageTemplate: z.string().default('').description('done 档位单独的正文模板，留空 = 用通用模板'),
-  decideTitleTemplate: z.string().default('').description('decide 档位单独的标题模板，留空 = 用通用模板'),
-  decideMessageTemplate: z.string().default('').description('decide 档位单独的正文模板，留空 = 用通用模板'),
-  rawTitleTemplate: z.string().default('').description('raw 档位单独的标题模板，留空 = 用通用模板'),
-  rawMessageTemplate: z.string().default('').description('raw 档位单独的正文模板，留空 = 用通用模板'),
+  hostMode: z.union(['script', 'exe']).default('script').description('宿主模式：script = 包内 PowerShell 脚本（默认），exe = 老的客户端 exe').volatile(),
+  scriptPath: z.string().default('').description('脚本宿主路径，留空 = 包内 host/ReminderHost.ps1').volatile(),
+  powershellPath: z.string().default('powershell.exe').description('调 PowerShell 用的可执行文件').volatile(),
+  clientDir: z.string().default('').description('exe 模式下的客户端目录，留空 = 包内 assets/').volatile(),
+  audioDir: z.string().default('').description('提示音目录，留空 = 包内 assets/提示音导入/').volatile(),
+  seconds: z.number().min(2).max(600).step(1).default(60).description('弹窗停留秒数（2–600）').volatile(),
+  position: z.union(['br', 'center', 'tr']).default('br').description('弹窗位置：br 右下、center 居中、tr 右上').volatile(),
+  sound: z.boolean().default(true).description('是否播放提示音').volatile(),
+  doneAudio: z.string().default('完成提醒语音.wav').description('done 档位的提示音文件名（wav / mp3，在提示音目录下）').volatile(),
+  decideAudio: z.string().default('需要你来决定.wav').description('decide 档位的提示音文件名（wav / mp3）').volatile(),
+  rawAudio: z.string().default('').description('raw 档位的提示音文件名（wav / mp3），留空 = 静音').volatile(),
+  accentDone: z.string().default('#2ECC71').description('done 档位卡片强调色（#RRGGBB）').volatile(),
+  accentDecide: z.string().default('#F5A623').description('decide 档位卡片强调色').volatile(),
+  accentRaw: z.string().default('#4C8DFF').description('raw 档位卡片强调色').volatile(),
+  cooldownMs: z.number().min(0).step(100).default(1500).description('同档位提醒的最小间隔（毫秒）').volatile(),
+  cardBackground: z.string().default('').description('卡片背景图路径（png / jpg），留空 = 纯色背景').volatile(),
+  cardIcon: z.string().default('').description('标题左侧的小图标路径（png / ico），留空 = 不显示').volatile(),
+  doneCardBackground: z.string().default('').description('done 档位单独用的背景图，留空 = 用上面的通用背景').volatile(),
+  decideCardBackground: z.string().default('').description('decide 档位单独用的背景图，留空 = 用通用背景').volatile(),
+  rawCardBackground: z.string().default('').description('raw 档位单独用的背景图，留空 = 用通用背景').volatile(),
+  doneCardIcon: z.string().default('').description('done 档位单独用的标题图标，留空 = 用通用图标').volatile(),
+  decideCardIcon: z.string().default('').description('decide 档位单独用的标题图标，留空 = 用通用图标').volatile(),
+  rawCardIcon: z.string().default('').description('raw 档位单独用的标题图标，留空 = 用通用图标').volatile(),
+  titleTemplate: z.string().default('{title}').description('标题模板，可用占位符 {title} {message} {kind} {time}').volatile(),
+  messageTemplate: z.string().default('{message}').description('正文模板，可用占位符 {title} {message} {kind} {time}').volatile(),
+  doneTitleTemplate: z.string().default('').description('done 档位单独的标题模板，留空 = 用上面的通用模板').volatile(),
+  doneMessageTemplate: z.string().default('').description('done 档位单独的正文模板，留空 = 用通用模板').volatile(),
+  decideTitleTemplate: z.string().default('').description('decide 档位单独的标题模板，留空 = 用通用模板').volatile(),
+  decideMessageTemplate: z.string().default('').description('decide 档位单独的正文模板，留空 = 用通用模板').volatile(),
+  rawTitleTemplate: z.string().default('').description('raw 档位单独的标题模板，留空 = 用通用模板').volatile(),
+  rawMessageTemplate: z.string().default('').description('raw 档位单独的正文模板，留空 = 用通用模板').volatile(),
 })
 
 const PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)))
@@ -103,8 +110,31 @@ function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value))
 }
 
+// 标了 .volatile() 的字段在运行期是 { get(), [write]() } 包装（schemastery 的热更新句柄），
+// 直接读会把字符串读成 "[object Object]"，所以统一在这里解包。
+function unwrapValue(value) {
+  if (value !== null && typeof value === 'object' && typeof value.get === 'function') {
+    try {
+      return value.get()
+    } catch {
+      return undefined
+    }
+  }
+  return value
+}
+
+function configValues(config) {
+  const out = {}
+  if (config !== null && typeof config === 'object') {
+    for (const key of Object.keys(config)) {
+      Object.defineProperty(out, key, { value: unwrapValue(config[key]), enumerable: true })
+    }
+  }
+  return out
+}
+
 function settingsOf(config) {
-  const c = config && typeof config === 'object' ? config : {}
+  const c = configValues(config)
   const position = str(c.position, 'br')
   const hostMode = str(c.hostMode, 'script').toLowerCase()
   return {
@@ -404,6 +434,7 @@ function toolDefinition(getSettings) {
 
 const AUDIO_EXTENSIONS = ['.wav', '.mp3', '.ogg', '.m4a', '.flac', '.aac', '.wma']
 const AUDIO_ROUTE = '/dsh-reminder-notify/audio'
+const CONFIG_ROUTE = '/dsh-reminder-notify/config'
 
 // 面板要「把音频目录里的文件列成下拉」，但 Client 侧没有任何读文件能力，
 // 所以由 Host 注册一条只读的 GET 路由，页面用同源 fetch 取这个 JSON。
@@ -457,8 +488,85 @@ function registerAudioRoute(ctx, getSettings) {
   }, 'dsh-reminder-notify: audio list route')
 }
 
+function readJsonBody(req, limit = 256 * 1024) {
+  return new Promise((resolve, reject) => {
+    let size = 0
+    const chunks = []
+    req.on('data', (chunk) => {
+      size += chunk.length
+      if (size > limit) {
+        reject(new Error('request body is too large'))
+        req.destroy()
+        return
+      }
+      chunks.push(chunk)
+    })
+    req.on('end', () => {
+      const text = Buffer.concat(chunks).toString('utf8').trim()
+      if (text === '') return resolve({})
+      try {
+        resolve(JSON.parse(text))
+      } catch (error) {
+        reject(error)
+      }
+    })
+    req.on('error', reject)
+  })
+}
+
+function registerConfigRoute(ctx, getSettings) {
+  const web = typeof ctx.get === 'function' ? ctx.get('webServer') : undefined
+  if (web === undefined || web === null || typeof web.register !== 'function') {
+    ctx.logger?.warn?.('dsh-reminder-notify: webServer is unavailable, the settings panel stays read-only')
+    return
+  }
+  const editable = new Set(Object.keys(settingsOf({})))
+  const reply = (res, status, payload) => {
+    res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+    res.end(JSON.stringify(payload))
+  }
+  const route = {
+    kind: 'exact',
+    path: CONFIG_ROUTE,
+    handler: async (req, res) => {
+      try {
+        if ((req.method ?? 'GET').toUpperCase() === 'GET') {
+          return reply(res, 200, { ok: true, writable: true, values: getSettings() })
+        }
+        const body = await readJsonBody(req)
+        const patch = body !== null && typeof body === 'object' && body.values !== null && typeof body.values === 'object'
+          ? body.values
+          : body
+        const entry = ctx.fiber?.entry
+        const editor = typeof ctx.get === 'function' ? ctx.get('configEditor') : undefined
+        if (entry === undefined || editor === undefined || typeof editor.edit !== 'function') {
+          return reply(res, 409, { ok: false, error: 'configuration cannot be saved in this profile' })
+        }
+        const changes = {}
+        for (const [key, value] of Object.entries(patch ?? {})) {
+          if (editable.has(key)) changes[key] = value
+        }
+        if (Object.keys(changes).length === 0) {
+          return reply(res, 400, { ok: false, error: 'no editable field in the request' })
+        }
+        await editor.edit(entry, (current) => ({ ...current, ...changes }))
+        return reply(res, 200, { ok: true, writable: true, values: getSettings() })
+      } catch (error) {
+        return reply(res, 500, { ok: false, error: String(error?.message ?? error) })
+      }
+    },
+  }
+  ctx.effect(() => {
+    const dispose = web.register(route)
+    return () => {
+      if (typeof dispose === 'function') dispose()
+    }
+  }, 'dsh-reminder-notify: settings route')
+}
+
 export function apply(ctx, config) {
   registerAudioRoute(ctx, () => settingsOf(config))
+  registerConfigRoute(ctx, () => settingsOf(config))
   const tools = typeof ctx.get === 'function' ? ctx.get('tools') : ctx.tools
   if (tools === undefined || tools === null || typeof tools.register !== 'function') {
     ctx.logger?.warn?.('dsh-reminder-notify: tools service is unavailable, notify_user was not registered')

@@ -16,12 +16,16 @@ window.__ModuleLoader__.load({
     const NS = 'dsh-reminder-notify'
     // 与 index.js 里 Host 注册的路由保持一致（同源 GET，返回 { dir, files, error? }）。
     const AUDIO_ROUTE = '/dsh-reminder-notify/audio'
+    const CONFIG_ROUTE = '/dsh-reminder-notify/config'
     const AUDIO_KEYS = ['doneAudio', 'decideAudio', 'rawAudio']
 
     const zh = {
       title: '桌面提醒设置',
-      intro: '调整弹窗停留时间、位置、提示音和卡片配色。改完点保存，插件会重启一次后生效。',
+      intro: '调整弹窗停留时间、位置、提示音和卡片配色。改完点保存，立刻生效，不用重启。',
       unavailable: '这个页面拿不到插件配置（可能是宿主版本较旧），请改用 cordis.patch.yml 修改。',
+      loading: '正在读取插件配置…',
+      loadFailed: '读取配置失败：',
+      retry: '重试',
       readonly: '当前配置由更高优先级的层覆盖，这里只能查看。',
       groupBasic: '基本',
       groupAudio: '提示音',
@@ -95,8 +99,11 @@ window.__ModuleLoader__.load({
 
     const en = {
       title: 'Desktop reminder settings',
-      intro: 'Tune the popup duration, position, sounds and card colours. Saving restarts the plugin once.',
+      intro: 'Tune the popup duration, position, sounds and card colours. Saving applies immediately, no restart.',
       unavailable: 'This page cannot read the plugin config (older host). Edit cordis.patch.yml instead.',
+      loading: 'Reading the plugin config…',
+      loadFailed: 'Could not read the config: ',
+      retry: 'Retry',
       readonly: 'A higher-priority layer overrides this config; it is read-only here.',
       groupBasic: 'Basics',
       groupAudio: 'Sounds',
@@ -265,16 +272,49 @@ window.__ModuleLoader__.load({
 
     function ReminderConfigPanel(props) {
       const t = props.t
-      const form = props.form
-      const state = form && form.state ? form.state : undefined
-      const values = (state && state.value) || {}
-      const writable = !!(state && state.writable)
-      const revision = state && state.revision
+      // 配置读写走插件自己注册的同源 HTTP 路由（Host 端用 configEditor 落盘），
+      // 不依赖宿主是否把 ConfigPageForm 传进槽位——那条链路在部分宿主版本里拿不到。
+      const [state, setState] = React.useState({ status: 'loading', values: {}, writable: true, error: null })
+      const [reload, setReload] = React.useState(0)
+      const values = state.values
+      const writable = state.writable !== false
       const [draft, setDraft] = React.useState(null)
       const [busy, setBusy] = React.useState(false)
       const [picking, setPicking] = React.useState(false)
       const [message, setMessage] = React.useState(null)
       const [audio, setAudio] = React.useState({ dir: '', files: [], error: null })
+
+      React.useEffect(() => {
+        if (typeof fetch !== 'function') {
+          setState({ status: 'error', values: {}, writable: false, error: 'fetch is unavailable' })
+          return undefined
+        }
+        let cancelled = false
+        Promise.resolve()
+          .then(() => fetch(CONFIG_ROUTE, { headers: { accept: 'application/json' } }))
+          .then((response) => {
+            const status = response ? response.status : 0
+            const body = response && typeof response.json === 'function' ? response.json() : Promise.resolve(null)
+            return Promise.resolve(body)
+              .catch(() => null)
+              .then((data) => {
+                if (response && response.ok && data && data.ok !== false) return data
+                const detail = data && data.error ? data.error : 'HTTP ' + status
+                throw new Error(detail)
+              })
+          })
+          .then((data) => {
+            if (cancelled) return
+            setState({ status: 'ready', values: (data && data.values) || {}, writable: (data && data.writable) !== false, error: null })
+          })
+          .catch((error) => {
+            if (cancelled) return
+            setState({ status: 'error', values: {}, writable: false, error: String((error && error.message) || error) })
+          })
+        return () => {
+          cancelled = true
+        }
+      }, [reload])
 
       // 音频候选：Host 端注册了只读路由 /dsh-reminder-notify/audio，页面同源 fetch 拿目录清单。
       // 拿不到（旧宿主 / 路由被拦）就静默降级成手填文件名，不打扰用户。
@@ -306,8 +346,21 @@ window.__ModuleLoader__.load({
         return h('span', null, `${tr('summaryPrefix')}${tr(posKey)} · ${values.seconds === undefined ? 60 : values.seconds}${tr('secondsUnit')} · ${sound}`)
       }
 
-      if (form === undefined || state === undefined) {
-        return h('div', { className: 'drn-panel' }, h('div', { className: 'drn-hint' }, typeof t === 'function' ? t('unavailable') : 'unavailable'))
+      if (state.status === 'loading') {
+        return h('div', { className: 'drn-panel' }, h('div', { className: 'drn-hint' }, typeof t === 'function' ? t('loading') : 'loading…'))
+      }
+
+      if (state.status === 'error') {
+        return h(
+          'div',
+          { className: 'drn-panel' },
+          h('div', { className: 'drn-hint error' }, (typeof t === 'function' ? t('loadFailed') : 'cannot read config: ') + (state.error || '')),
+          h(
+            'div',
+            { className: 'drn-actions' },
+            h('button', { type: 'button', className: 'drn-btn', onClick: () => setReload(reload + 1) }, typeof t === 'function' ? t('retry') : 'Retry'),
+          ),
+        )
       }
 
       const effective = draft === null ? values : Object.assign({}, values, draft)
@@ -322,27 +375,41 @@ window.__ModuleLoader__.load({
         setDraft(Object.assign({}, draft || {}, { [key]: value }))
       }
 
-      function changedOps() {
-        const ops = []
+      function changedPatch() {
+        const patch = {}
         for (const field of FIELDS) {
           const current = effective[field.key]
           const saved = values[field.key]
           if (sameValue(current, saved)) continue
-          ops.push({ op: 'set', path: [field.key], value: current === '' ? (field.kind === 'text' ? '' : current) : current })
+          patch[field.key] = current === undefined ? '' : current
         }
-        return ops
+        return patch
       }
 
-      const ops = changedOps()
-      const dirty = ops.length > 0
+      const patch = changedPatch()
+      const dirty = Object.keys(patch).length > 0
 
       function save() {
         if (!dirty || busy) return
         setBusy(true)
         setMessage(null)
-        Promise.resolve(form.mutate(ops, revision))
-          .then(() => {
+        Promise.resolve()
+          .then(() =>
+            fetch(CONFIG_ROUTE, {
+              method: 'POST',
+              headers: { 'content-type': 'application/json', accept: 'application/json' },
+              body: JSON.stringify({ values: patch }),
+            }),
+          )
+          .then((response) =>
+            response && typeof response.json === 'function'
+              ? response.json().then((data) => ({ ok: !!(response.ok && data && data.ok !== false), data }))
+              : Promise.reject(new Error('HTTP ' + (response ? response.status : '?'))),
+          )
+          .then(({ ok, data }) => {
             setBusy(false)
+            if (!ok) throw new Error((data && data.error) || 'save rejected')
+            setState({ status: 'ready', values: (data && data.values) || effective, writable: (data && data.writable) !== false, error: null })
             setDraft(null)
             setMessage({ ok: true, text: typeof t === 'function' ? t('saved') : 'saved' })
           })

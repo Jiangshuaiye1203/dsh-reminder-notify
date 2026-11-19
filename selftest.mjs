@@ -109,3 +109,22 @@ const scanned = listAudioFiles(fileURLToPath(new URL('./assets/提示音导入',
 if (!Array.isArray(scanned.files) || scanned.files.length === 0) throw new Error('音频目录扫描没有返回文件：' + JSON.stringify(scanned))
 if (!scanned.files.every((name) => /\.(wav|mp3|ogg|m4a|flac|aac|wma)$/i.test(name))) throw new Error('扫描结果混进了非音频文件：' + scanned.files.join(','))
 console.log('audio-scan ok', scanned.files.join(' | '))
+
+// volatile 包装回归：宿主给插件的 config 字段是 { get() } 热更新包装，
+// settingsOf() 必须解包，否则字符串会变成 "[object Object]"。
+const { Config } = await import("./index.js")
+if (Config === undefined) throw new Error("Config 没有导出，插件页不会有设置面板")
+const liveConfig = Config({ seconds: 90, sound: true, doneAudio: "完成提醒语音.wav", titleTemplate: "热更 {title}" })
+if (typeof liveConfig.seconds?.get !== "function") throw new Error("Config 字段没有 volatile 包装，插件页拿不到设置面板")
+let live
+apply(
+  makeCtx((d) => {
+    live = d
+  }),
+  liveConfig,
+)
+const liveOut = JSON.parse(await live.execute({ kind: "done", message: "热更新" }))
+if (liveOut.seconds !== 90) throw new Error("volatile 字段没有解包：seconds=" + JSON.stringify(liveOut.seconds))
+if (!/完成提醒语音\.wav$/.test(String(liveOut.audio))) throw new Error("volatile 字段没有解包：audio=" + String(liveOut.audio))
+if (liveOut.title !== "热更 Harness 已完成工作") throw new Error("volatile 模板没有生效：" + liveOut.title)
+console.log("volatile ok", liveOut.seconds, "|", liveOut.audio, "|", liveOut.title)
