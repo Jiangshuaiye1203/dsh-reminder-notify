@@ -44,6 +44,12 @@ export const Config = z === null ? undefined : z.object({
   cooldownMs: z.number().min(0).step(100).default(1500).description('同档位提醒的最小间隔（毫秒）'),
   cardBackground: z.string().default('').description('卡片背景图路径（png / jpg），留空 = 纯色背景'),
   cardIcon: z.string().default('').description('标题左侧的小图标路径（png / ico），留空 = 不显示'),
+  doneCardBackground: z.string().default('').description('done 档位单独用的背景图，留空 = 用上面的通用背景'),
+  decideCardBackground: z.string().default('').description('decide 档位单独用的背景图，留空 = 用通用背景'),
+  rawCardBackground: z.string().default('').description('raw 档位单独用的背景图，留空 = 用通用背景'),
+  doneCardIcon: z.string().default('').description('done 档位单独用的标题图标，留空 = 用通用图标'),
+  decideCardIcon: z.string().default('').description('decide 档位单独用的标题图标，留空 = 用通用图标'),
+  rawCardIcon: z.string().default('').description('raw 档位单独用的标题图标，留空 = 用通用图标'),
   titleTemplate: z.string().default('{title}').description('标题模板，可用占位符 {title} {message} {kind} {time}'),
   messageTemplate: z.string().default('{message}').description('正文模板，可用占位符 {title} {message} {kind} {time}'),
 })
@@ -113,6 +119,12 @@ function settingsOf(config) {
     cooldownMs: Math.max(0, Math.round(num(c.cooldownMs, 1500))),
     cardBackground: str(c.cardBackground, ''),
     cardIcon: str(c.cardIcon, ''),
+    doneCardBackground: str(c.doneCardBackground, ''),
+    decideCardBackground: str(c.decideCardBackground, ''),
+    rawCardBackground: str(c.rawCardBackground, ''),
+    doneCardIcon: str(c.doneCardIcon, ''),
+    decideCardIcon: str(c.decideCardIcon, ''),
+    rawCardIcon: str(c.rawCardIcon, ''),
     titleTemplate: typeof c.titleTemplate === 'string' ? c.titleTemplate : '{title}',
     messageTemplate: typeof c.messageTemplate === 'string' ? c.messageTemplate : '{message}',
   }
@@ -154,7 +166,18 @@ function assetPath(value) {
   return fs.existsSync(full) ? full : ''
 }
 
-// 参数数组交给 spawn，Windows 下由 CreateProcess 的引号规则处理空格与中文；
+// 档位外观：doneCardBackground / decideCardIcon 这类按档位覆盖，留空就退回通用值。
+function appearanceOf(kind, settings) {
+  const background = str(settings[`${kind}CardBackground`], '') !== ''
+    ? settings[`${kind}CardBackground`]
+    : settings.cardBackground
+  const icon = str(settings[`${kind}CardIcon`], '') !== ''
+    ? settings[`${kind}CardIcon`]
+    : settings.cardIcon
+  return { background: assetPath(background), icon: assetPath(icon) }
+}
+
+
 // PowerShell 自己还会再解析一遍 -File 之后的参数，所以这里把英文双引号替换掉，
 // 避免一条带引号的正文把后面所有参数吃掉。
 function psSafe(value) {
@@ -288,7 +311,7 @@ async function notify(kind, args, settings) {
 }
 
 async function fireScript(settings, title, message, seconds, kind, audioPath, sound, scriptPath, missingAudio) {
-  const extras = { background: assetPath(settings.cardBackground), icon: assetPath(settings.cardIcon) }
+  const extras = appearanceOf(kind, settings)
   const argv = argvOfScriptHost(title, message, seconds, settings.position, accentOf(kind, settings), audioPath, sound, extras)
   argv[argv.indexOf(null)] = scriptPath
   try {
@@ -306,6 +329,8 @@ async function fireScript(settings, title, message, seconds, kind, audioPath, so
       sound: sound && audioPath !== '',
       audio: sound && audioPath !== '' ? audioPath : null,
       audioMissing: missingAudio !== '' ? missingAudio : undefined,
+      background: extras.background !== '' ? extras.background : null,
+      icon: extras.icon !== '' ? extras.icon : null,
       pid,
       host: scriptPath,
       earlyExit: early === 'running' ? null : early,
