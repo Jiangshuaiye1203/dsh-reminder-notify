@@ -14,6 +14,9 @@ window.__ModuleLoader__.load({
     const h = React.createElement
 
     const NS = 'dsh-reminder-notify'
+    // 与 index.js 里 Host 注册的路由保持一致（同源 GET，返回 { dir, files, error? }）。
+    const AUDIO_ROUTE = '/dsh-reminder-notify/audio'
+    const AUDIO_KEYS = ['doneAudio', 'decideAudio', 'rawAudio']
 
     const zh = {
       title: '桌面提醒设置',
@@ -57,6 +60,17 @@ window.__ModuleLoader__.load({
       titleTemplate: '标题模板',
       messageTemplate: '正文模板',
       templateHint: '可用占位符 {title} {message} {kind} {time}。',
+      doneTitleTemplate: 'done 专用标题模板',
+      doneMessageTemplate: 'done 专用正文模板',
+      decideTitleTemplate: 'decide 专用标题模板',
+      decideMessageTemplate: 'decide 专用正文模板',
+      rawTitleTemplate: 'raw 专用标题模板',
+      rawMessageTemplate: 'raw 专用正文模板',
+      perKindTemplateHint: '留空 = 用上面的通用模板；可用占位符 {title} {message} {kind} {time}。',
+      audioPick: '从目录选',
+      audioScanning: '正在读取音频目录…',
+      audioEmpty: '音频目录里没有可用的音频文件',
+      audioFailed: '读取音频目录失败：',
       hostMode: '宿主模式',
       hostModeScript: '包内脚本（推荐）',
       hostModeExe: '外部 exe 客户端',
@@ -121,6 +135,17 @@ window.__ModuleLoader__.load({
       titleTemplate: 'Title template',
       messageTemplate: 'Message template',
       templateHint: 'Placeholders: {title} {message} {kind} {time}.',
+      doneTitleTemplate: 'Done-only title template',
+      doneMessageTemplate: 'Done-only message template',
+      decideTitleTemplate: 'Decide-only title template',
+      decideMessageTemplate: 'Decide-only message template',
+      rawTitleTemplate: 'Raw-only title template',
+      rawMessageTemplate: 'Raw-only message template',
+      perKindTemplateHint: 'Empty falls back to the shared template; placeholders: {title} {message} {kind} {time}.',
+      audioPick: 'Pick from the directory',
+      audioScanning: 'Reading the sound directory…',
+      audioEmpty: 'No audio files in the sound directory',
+      audioFailed: 'Could not read the sound directory: ',
       hostMode: 'Host mode',
       hostModeScript: 'Bundled script (recommended)',
       hostModeExe: 'External exe client',
@@ -194,6 +219,12 @@ window.__ModuleLoader__.load({
       { key: 'rawCardIcon', group: 'look', kind: 'text' },
       { key: 'titleTemplate', group: 'look', kind: 'text' },
       { key: 'messageTemplate', group: 'look', kind: 'text' },
+      { key: 'doneTitleTemplate', group: 'look', kind: 'text' },
+      { key: 'doneMessageTemplate', group: 'look', kind: 'text' },
+      { key: 'decideTitleTemplate', group: 'look', kind: 'text' },
+      { key: 'decideMessageTemplate', group: 'look', kind: 'text' },
+      { key: 'rawTitleTemplate', group: 'look', kind: 'text' },
+      { key: 'rawMessageTemplate', group: 'look', kind: 'text' },
       { key: 'hostMode', group: 'host', kind: 'select', options: ['script', 'exe'], optionLabels: ['hostModeScript', 'hostModeExe'] },
       { key: 'scriptPath', group: 'host', kind: 'text' },
       { key: 'powershellPath', group: 'host', kind: 'text' },
@@ -216,6 +247,12 @@ window.__ModuleLoader__.load({
       rawCardIcon: 'perKindHint',
       titleTemplate: 'templateHint',
       messageTemplate: 'templateHint',
+      doneTitleTemplate: 'perKindTemplateHint',
+      doneMessageTemplate: 'perKindTemplateHint',
+      decideTitleTemplate: 'perKindTemplateHint',
+      decideMessageTemplate: 'perKindTemplateHint',
+      rawTitleTemplate: 'perKindTemplateHint',
+      rawMessageTemplate: 'perKindTemplateHint',
       scriptPath: 'scriptPathHint',
     }
 
@@ -237,6 +274,30 @@ window.__ModuleLoader__.load({
       const [busy, setBusy] = React.useState(false)
       const [picking, setPicking] = React.useState(false)
       const [message, setMessage] = React.useState(null)
+      const [audio, setAudio] = React.useState({ dir: '', files: [], error: null })
+
+      // 音频候选：Host 端注册了只读路由 /dsh-reminder-notify/audio，页面同源 fetch 拿目录清单。
+      // 拿不到（旧宿主 / 路由被拦）就静默降级成手填文件名，不打扰用户。
+      const scanDir = (draft && typeof draft.audioDir === 'string' && draft.audioDir !== '' ? draft.audioDir : values.audioDir) || ''
+      React.useEffect(() => {
+        if (typeof fetch !== 'function') return undefined
+        let cancelled = false
+        const url = AUDIO_ROUTE + (scanDir === '' ? '' : '?dir=' + encodeURIComponent(scanDir))
+        Promise.resolve()
+          .then(() => fetch(url, { headers: { accept: 'application/json' } }))
+          .then((response) => (response && response.ok ? response.json() : Promise.reject(new Error('HTTP ' + (response ? response.status : '?')))))
+          .then((data) => {
+            if (cancelled) return
+            setAudio({ dir: (data && data.dir) || scanDir, files: data && Array.isArray(data.files) ? data.files : [], error: (data && data.error) || null })
+          })
+          .catch((error) => {
+            if (cancelled) return
+            setAudio({ dir: scanDir, files: [], error: String((error && error.message) || error) })
+          })
+        return () => {
+          cancelled = true
+        }
+      }, [scanDir])
 
       if (props.view === 'summary') {
         const tr = typeof t === 'function' ? t : (key) => key
@@ -349,6 +410,28 @@ window.__ModuleLoader__.load({
           disabled,
           onChange: (e) => edit(field.key, e.target.value, field.kind),
         })
+        if (AUDIO_KEYS.includes(field.key) && audio.files.length > 0) {
+          return h(
+            'div',
+            { className: 'drn-pick' },
+            input,
+            h(
+              'select',
+              {
+                className: 'drn-select',
+                disabled,
+                value: '',
+                onChange: (e) => {
+                  const picked = e.target.value
+                  if (picked !== '') edit(field.key, picked, 'text')
+                },
+              },
+              [h('option', { value: '' }, typeof t === 'function' ? t('audioPick') : 'pick')].concat(
+                audio.files.map((name) => h('option', { value: name }, name)),
+              ),
+            ),
+          )
+        }
         if (field.pick === 'directory' && typeof props.pickDirectory === 'function') {
           return h(
             'div',

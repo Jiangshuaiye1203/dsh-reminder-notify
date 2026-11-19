@@ -52,6 +52,12 @@ export const Config = z === null ? undefined : z.object({
   rawCardIcon: z.string().default('').description('raw 档位单独用的标题图标，留空 = 用通用图标'),
   titleTemplate: z.string().default('{title}').description('标题模板，可用占位符 {title} {message} {kind} {time}'),
   messageTemplate: z.string().default('{message}').description('正文模板，可用占位符 {title} {message} {kind} {time}'),
+  doneTitleTemplate: z.string().default('').description('done 档位单独的标题模板，留空 = 用上面的通用模板'),
+  doneMessageTemplate: z.string().default('').description('done 档位单独的正文模板，留空 = 用通用模板'),
+  decideTitleTemplate: z.string().default('').description('decide 档位单独的标题模板，留空 = 用通用模板'),
+  decideMessageTemplate: z.string().default('').description('decide 档位单独的正文模板，留空 = 用通用模板'),
+  rawTitleTemplate: z.string().default('').description('raw 档位单独的标题模板，留空 = 用通用模板'),
+  rawMessageTemplate: z.string().default('').description('raw 档位单独的正文模板，留空 = 用通用模板'),
 })
 
 const PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)))
@@ -127,6 +133,12 @@ function settingsOf(config) {
     rawCardIcon: str(c.rawCardIcon, ''),
     titleTemplate: typeof c.titleTemplate === 'string' ? c.titleTemplate : '{title}',
     messageTemplate: typeof c.messageTemplate === 'string' ? c.messageTemplate : '{message}',
+    doneTitleTemplate: typeof c.doneTitleTemplate === 'string' ? c.doneTitleTemplate : '',
+    doneMessageTemplate: typeof c.doneMessageTemplate === 'string' ? c.doneMessageTemplate : '',
+    decideTitleTemplate: typeof c.decideTitleTemplate === 'string' ? c.decideTitleTemplate : '',
+    decideMessageTemplate: typeof c.decideMessageTemplate === 'string' ? c.decideMessageTemplate : '',
+    rawTitleTemplate: typeof c.rawTitleTemplate === 'string' ? c.rawTitleTemplate : '',
+    rawMessageTemplate: typeof c.rawMessageTemplate === 'string' ? c.rawMessageTemplate : '',
   }
 }
 
@@ -251,8 +263,11 @@ async function notify(kind, args, settings) {
   const plainTitle = str(args.title, DEFAULT_TITLES[kind])
   const plainMessage = str(args.message, DEFAULT_MESSAGES[kind])
   const vars = { title: plainTitle, message: plainMessage, kind, time: clockText(new Date()) }
-  const title = renderTemplate(settings.titleTemplate, '{title}', vars)
-  const message = renderTemplate(settings.messageTemplate, '{message}', vars)
+  // 档位模板优先：留空就退回上面的通用模板，两层都空才落到 "{title}" / "{message}"。
+  const kindTitleTemplate = str(settings[`${kind}TitleTemplate`], '')
+  const kindMessageTemplate = str(settings[`${kind}MessageTemplate`], '')
+  const title = renderTemplate(kindTitleTemplate !== '' ? kindTitleTemplate : settings.titleTemplate, '{title}', vars)
+  const message = renderTemplate(kindMessageTemplate !== '' ? kindMessageTemplate : settings.messageTemplate, '{message}', vars)
   const seconds = Math.round(clamp(num(args.seconds, settings.seconds), 2, 600))
   const sound = args.sound === false ? false : settings.sound
   const audio = audioNameOf(kind, settings)
@@ -387,7 +402,63 @@ function toolDefinition(getSettings) {
   }
 }
 
+const AUDIO_EXTENSIONS = ['.wav', '.mp3', '.ogg', '.m4a', '.flac', '.aac', '.wma']
+const AUDIO_ROUTE = '/dsh-reminder-notify/audio'
+
+// 面板要「把音频目录里的文件列成下拉」，但 Client 侧没有任何读文件能力，
+// 所以由 Host 注册一条只读的 GET 路由，页面用同源 fetch 取这个 JSON。
+export function listAudioFiles(dir) {
+  const files = []
+  let entries = []
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true })
+  } catch (error) {
+    return { dir, files, error: String((error && error.message) || error) }
+  }
+  for (const entry of entries) {
+    if (!entry.isFile()) continue
+    const ext = path.extname(entry.name).toLowerCase()
+    if (AUDIO_EXTENSIONS.includes(ext)) files.push(entry.name)
+  }
+  files.sort((a, b) => a.localeCompare(b, 'zh-Hans-CN'))
+  return { dir, files }
+}
+
+function registerAudioRoute(ctx, getSettings) {
+  const web = typeof ctx.get === 'function' ? ctx.get('webServer') : undefined
+  if (web === undefined || web === null || typeof web.register !== 'function') {
+    ctx.logger?.warn?.('dsh-reminder-notify: webServer is unavailable, the audio list dropdown stays manual-entry only')
+    return
+  }
+  const route = {
+    kind: 'exact',
+    path: AUDIO_ROUTE,
+    handler: (req, res) => {
+      const settings = getSettings()
+      const requested = (() => {
+        try {
+          const url = new URL(req.url ?? AUDIO_ROUTE, 'http://127.0.0.1')
+          return url.searchParams.get('dir') ?? ''
+        } catch {
+          return ''
+        }
+      })()
+      const dir = requested !== '' ? path.resolve(requested) : settings.audioDir
+      const body = JSON.stringify(listAudioFiles(dir))
+      res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+      res.end(body)
+    },
+  }
+  ctx.effect(() => {
+    const dispose = web.register(route)
+    return () => {
+      if (typeof dispose === 'function') dispose()
+    }
+  }, 'dsh-reminder-notify: audio list route')
+}
+
 export function apply(ctx, config) {
+  registerAudioRoute(ctx, () => settingsOf(config))
   const tools = typeof ctx.get === 'function' ? ctx.get('tools') : ctx.tools
   if (tools === undefined || tools === null || typeof tools.register !== 'function') {
     ctx.logger?.warn?.('dsh-reminder-notify: tools service is unavailable, notify_user was not registered')
