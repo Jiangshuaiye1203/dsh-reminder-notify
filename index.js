@@ -42,6 +42,10 @@ export const Config = z === null ? undefined : z.object({
   accentDecide: z.string().default('#F5A623').description('decide 档位卡片强调色'),
   accentRaw: z.string().default('#4C8DFF').description('raw 档位卡片强调色'),
   cooldownMs: z.number().min(0).step(100).default(1500).description('同档位提醒的最小间隔（毫秒）'),
+  cardBackground: z.string().default('').description('卡片背景图路径（png / jpg），留空 = 纯色背景'),
+  cardIcon: z.string().default('').description('标题左侧的小图标路径（png / ico），留空 = 不显示'),
+  titleTemplate: z.string().default('{title}').description('标题模板，可用占位符 {title} {message} {kind} {time}'),
+  messageTemplate: z.string().default('{message}').description('正文模板，可用占位符 {title} {message} {kind} {time}'),
 })
 
 const PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)))
@@ -107,6 +111,10 @@ function settingsOf(config) {
     accentDecide: str(c.accentDecide, DEFAULT_ACCENTS.decide),
     accentRaw: str(c.accentRaw, DEFAULT_ACCENTS.raw),
     cooldownMs: Math.max(0, Math.round(num(c.cooldownMs, 1500))),
+    cardBackground: str(c.cardBackground, ''),
+    cardIcon: str(c.cardIcon, ''),
+    titleTemplate: typeof c.titleTemplate === 'string' ? c.titleTemplate : '{title}',
+    messageTemplate: typeof c.messageTemplate === 'string' ? c.messageTemplate : '{message}',
   }
 }
 
@@ -125,6 +133,25 @@ function accentOf(kind, settings) {
   const raw = kind === 'done' ? settings.accentDone : kind === 'decide' ? settings.accentDecide : settings.accentRaw
   // 不带 #：PowerShell 会把 # 开头的参数当成注释，后面就等于没传值。
   return String(raw).replace(/^#/, '')
+}
+
+// 文案模板：{title} {message} {kind} {time}，模板为空或整行留空时按原文输出。
+function clockText(date) {
+  const pad = (n) => String(n).padStart(2, '0')
+  return `${pad(date.getHours())}:${pad(date.getMinutes())}`
+}
+
+function renderTemplate(template, fallback, vars) {
+  const tpl = typeof template === 'string' && template.trim() !== '' ? template : fallback
+  return tpl.replace(/\{(title|message|kind|time)\}/g, (_match, key) => String(vars[key] ?? ''))
+}
+
+// 背景图 / 图标：支持绝对路径，也支持相对包目录的路径；文件不在就当作没配。
+function assetPath(value) {
+  const raw = typeof value === 'string' ? value.trim() : ''
+  if (raw === '') return ''
+  const full = path.isAbsolute(raw) ? raw : path.resolve(PACKAGE_ROOT, raw)
+  return fs.existsSync(full) ? full : ''
 }
 
 // 参数数组交给 spawn，Windows 下由 CreateProcess 的引号规则处理空格与中文；
@@ -165,7 +192,7 @@ function launch(file, argv, cwd) {
   })
 }
 
-function argvOfScriptHost(title, message, seconds, position, accent, audioPath, sound) {
+function argvOfScriptHost(title, message, seconds, position, accent, audioPath, sound, extras) {
   const argv = [
     '-NoProfile',
     '-NonInteractive',
@@ -188,6 +215,8 @@ function argvOfScriptHost(title, message, seconds, position, accent, audioPath, 
   ]
   if (sound && audioPath !== '') argv.push('-Audio', audioPath)
   else argv.push('-NoSound')
+  if (extras && extras.background) argv.push('-Background', extras.background)
+  if (extras && extras.icon) argv.push('-Icon', extras.icon)
   return argv
 }
 
@@ -196,8 +225,11 @@ async function notify(kind, args, settings) {
     return { ok: false, error: 'only-windows', detail: '桌面提醒只能在本机 Windows 上弹出' }
   }
 
-  const title = str(args.title, DEFAULT_TITLES[kind])
-  const message = str(args.message, DEFAULT_MESSAGES[kind])
+  const plainTitle = str(args.title, DEFAULT_TITLES[kind])
+  const plainMessage = str(args.message, DEFAULT_MESSAGES[kind])
+  const vars = { title: plainTitle, message: plainMessage, kind, time: clockText(new Date()) }
+  const title = renderTemplate(settings.titleTemplate, '{title}', vars)
+  const message = renderTemplate(settings.messageTemplate, '{message}', vars)
   const seconds = Math.round(clamp(num(args.seconds, settings.seconds), 2, 600))
   const sound = args.sound === false ? false : settings.sound
   const audio = audioNameOf(kind, settings)
@@ -256,7 +288,8 @@ async function notify(kind, args, settings) {
 }
 
 async function fireScript(settings, title, message, seconds, kind, audioPath, sound, scriptPath, missingAudio) {
-  const argv = argvOfScriptHost(title, message, seconds, settings.position, accentOf(kind, settings), audioPath, sound)
+  const extras = { background: assetPath(settings.cardBackground), icon: assetPath(settings.cardIcon) }
+  const argv = argvOfScriptHost(title, message, seconds, settings.position, accentOf(kind, settings), audioPath, sound, extras)
   argv[argv.indexOf(null)] = scriptPath
   try {
     const { pid, exited } = await launch(settings.powershellPath, argv, PACKAGE_ROOT)

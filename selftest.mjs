@@ -25,3 +25,22 @@ console.log('cooldown ->', second)
 
 const raw = await captured.execute({ kind: 'raw', title: '自检 raw', message: 'raw 档位，不带语音。', sound: false, seconds: 5 })
 console.log('raw ->', raw)
+
+// 模板：标题加档位前缀、正文追加时间；两处占位符都应在结果里被替换掉。
+let templated
+apply(
+  { ...ctx, get: () => ({ register(d) { templated = d; return () => {} } }) },
+  {
+    seconds: 5,
+    position: 'br',
+    sound: false,
+    cooldownMs: 0,
+    titleTemplate: '[{kind}] {title}',
+    messageTemplate: '{message}（{time}）',
+  },
+)
+const tpl = JSON.parse(await templated.execute({ kind: 'done', message: '模板正文', sound: false }))
+console.log('template ->', tpl.title, '|', tpl.message)
+if (!/^\[done\]/.test(tpl.title)) throw new Error('titleTemplate 没有生效')
+if (!/^模板正文（\d{2}:\d{2}）$/.test(tpl.message)) throw new Error('messageTemplate 没有生效')
+console.log('template ok')
