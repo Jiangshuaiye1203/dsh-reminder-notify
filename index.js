@@ -978,6 +978,21 @@ function registerPreviewRoute(ctx, getSettings) {
         if (!['done', 'decide', 'raw'].includes(kind)) {
           return reply(res, 400, { ok: false, error: `unknown kind: ${kind}` })
         }
+        // 面板上的「试试看」：mode=card 时真的弹一张样卡，比只播提示音更能说明效果。
+        if (str(body?.mode, 'audio') === 'card') {
+          const settings = getSettings()
+          const sample = {
+            done: '这是一张「完成」卡：任务做完时这样弹，带提示音、按钮，到点自己消失。',
+            decide: '这是一张「需要你决定」卡：等你拍板时这样弹。',
+            raw: '这是一张通用提醒卡，标题和正文都由调用方给。',
+          }[kind]
+          const card = await notify(
+            kind,
+            { message: sample, seconds: Math.min(num(settings.seconds, 60), 20) },
+            { ...settings, quietEnabled: false },
+          )
+          return reply(res, 200, { ok: true, mode: 'card', kind, card })
+        }
         const result = await previewAudio(kind, getSettings())
         if (result.ok) return reply(res, 200, result)
         const status = result.error === 'no-audio' || result.error === 'audio-not-found' ? 400 : 500

@@ -252,6 +252,17 @@ window.__ModuleLoader__.load({
       groupQueue: '排队与免打扰',
       groupHistory: '历史与统计',
       groupDigest: '日报与推送',
+      // 0.13：高频项在前，其余收进折叠块；说明搬到插件详情页。
+      groupAdvanced: '高级：历史、余额与宿主',
+      foldExpand: '展开',
+      foldCollapse: '收起',
+      tryTitle: '试试看：',
+      tryDone: '发一张完成卡',
+      tryDecide: '发一张决定卡',
+      tryRaw: '发一张通用卡',
+      tryShown: '已经弹出一张样卡，20 秒后自动关闭。',
+      tryQuiet: '现在在免打扰时段，样卡被拦住了（正常行为）。',
+      tryFailed: '没能弹出示意卡：',
       speakEnabled: '朗读提醒内容',
       buttonsEnabled: '卡片显示按钮',
       snoozeMinutes: '「稍后提醒」延后分钟',
@@ -335,6 +346,16 @@ window.__ModuleLoader__.load({
       groupQueue: 'Queue & quiet hours',
       groupHistory: 'History & stats',
       groupDigest: 'Digest & push',
+      groupAdvanced: 'Advanced: history, balance & host',
+      foldExpand: 'expand',
+      foldCollapse: 'collapse',
+      tryTitle: 'Try it:',
+      tryDone: 'Show a done card',
+      tryDecide: 'Show a decision card',
+      tryRaw: 'Show a plain card',
+      tryShown: 'A sample card is on screen; it closes itself in 20 seconds.',
+      tryQuiet: 'Quiet hours are active, so the sample was held back (expected).',
+      tryFailed: 'Could not show the sample: ',
       speakEnabled: 'Speak the reminder',
       buttonsEnabled: 'Show card buttons',
       snoozeMinutes: 'Snooze minutes',
@@ -440,6 +461,14 @@ window.__ModuleLoader__.load({
 .drn-btn.small { padding: 5px 10px; white-space: nowrap; }
 .drn-msg { font-size: 12px; color: var(--dsw-alias-label-secondary); }
 .drn-msg.error { color: var(--dsw-alias-state-error-primary); }
+.drn-summary { font-size: 12px; line-height: 1.55; color: var(--dsw-alias-label-secondary); border: 1px dashed var(--dsw-alias-border-l1); border-radius: 8px; padding: 8px 10px; }
+.drn-try { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.drn-try-title { font-size: 12px; color: var(--dsw-alias-label-secondary); }
+.drn-fold { border: 1px solid var(--dsw-alias-border-l1); border-radius: 10px; background: var(--dsw-alias-bg-layer-1); }
+.drn-fold-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; box-sizing: border-box; font: inherit; font-size: 12px; font-weight: 600; color: var(--dsw-alias-label-secondary); background: transparent; border: 0; padding: 10px 14px; cursor: pointer; text-align: left; }
+.drn-fold-body { display: flex; flex-direction: column; gap: 12px; padding: 0 14px 14px; }
+.drn-fold-body > .drn-group { border: 0; padding: 0; background: transparent; }
+.drn-chevron { font-size: 11px; }
 `
 
     // 字段表：kind 决定控件类型，group 决定分组，缺省值来自宿主 config。
@@ -447,7 +476,7 @@ window.__ModuleLoader__.load({
       { key: 'seconds', group: 'basic', kind: 'number' },
       { key: 'position', group: 'basic', kind: 'select', options: ['br', 'center', 'tr'], optionLabels: ['positionBr', 'positionCenter', 'positionTr'] },
       { key: 'sound', group: 'basic', kind: 'boolean' },
-      { key: 'cooldownMs', group: 'basic', kind: 'number' },
+      { key: 'cooldownMs', group: 'host', kind: 'number' },
       { key: 'doneAudio', group: 'audio', kind: 'text' },
       { key: 'decideAudio', group: 'audio', kind: 'text' },
       { key: 'rawAudio', group: 'audio', kind: 'text' },
@@ -561,6 +590,16 @@ window.__ModuleLoader__.load({
     const GROUPS = ['basic', 'audio', 'look', 'queue', 'history', 'digest', 'balance', 'host']
     const GROUP_LABELS = { basic: 'groupBasic', audio: 'groupAudio', look: 'groupLook', queue: 'groupQueue', history: 'groupHistory', digest: 'groupDigest', balance: 'groupBalance', host: 'groupHost' }
 
+    // 0.13：面板分两层。常用层只放「不填就不对劲」的项，其余按主题收进四个折叠块。
+    const COMMON_DIGEST = ['pushEnabled', 'pushUrl', 'pushFormat', 'digestEnabled', 'digestTime']
+    const ADV_DIGEST = ['digestTitle', 'digestIncludeBalance', 'digestAlertCount', 'pushDecide', 'pushDigest']
+    const ADV_BLOCKS = [
+      { id: 'look', label: 'groupLook', groups: ['look'] },
+      { id: 'audio', label: 'groupAudio', groups: ['audio'] },
+      { id: 'queue', label: 'groupQueue', groups: ['queue'] },
+      { id: 'misc', label: 'groupAdvanced', groups: ['digest', 'history', 'balance', 'host'] },
+    ]
+
     function sameValue(a, b) {
       return JSON.stringify(a) === JSON.stringify(b)
     }
@@ -585,6 +624,9 @@ window.__ModuleLoader__.load({
       const [historyBusy, setHistoryBusy] = React.useState(false)
       const [digest, setDigest] = React.useState(null)
       const [digestBusy, setDigestBusy] = React.useState(false)
+      // 0.13：折叠块的展开状态（默认全收起）与「试试看」的忙碌标记。
+      const [openBlocks, setOpenBlocks] = React.useState({})
+      const [tryBusy, setTryBusy] = React.useState(null)
 
       React.useEffect(() => {
         if (typeof fetch !== 'function') {
@@ -783,6 +825,52 @@ window.__ModuleLoader__.load({
           .catch((error) => {
             setPreviewing(null)
             const prefix = typeof t === 'function' ? t('previewFailed') : 'preview failed: '
+            setMessage({ ok: false, text: prefix + String((error && error.message) || error) })
+          })
+      }
+
+      // 0.13「试试看」：让宿主真的弹一张样卡（POST /preview，mode=card），
+      // 比读说明书更快知道每一档长什么样。样卡只停 20 秒，不改任何配置。
+      function tryCard(kind) {
+        if (tryBusy !== null) return
+        setTryBusy(kind)
+        setMessage(null)
+        Promise.resolve()
+          .then(() =>
+            fetch(PREVIEW_ROUTE, {
+              method: 'POST',
+              headers: { 'content-type': 'application/json', accept: 'application/json' },
+              body: JSON.stringify({ mode: 'card', kind }),
+            }),
+          )
+          .then((response) => {
+            const status = response ? response.status : 0
+            const body = response && typeof response.json === 'function' ? response.json() : Promise.resolve(null)
+            return Promise.resolve(body)
+              .catch(() => null)
+              .then((data) => {
+                if (response && response.ok && data && data.ok !== false) return data
+                const detail = data && (data.detail || data.error) ? (data.detail || data.error) : 'HTTP ' + status
+                throw new Error(detail)
+              })
+          })
+          .then((data) => {
+            setTryBusy(null)
+            const label = typeof t === 'function' ? t : (key) => key
+            const card = data && data.card ? data.card : {}
+            if (card.ok === false) {
+              setMessage({ ok: false, text: label('tryFailed') + String(card.detail || card.error || '') })
+              return
+            }
+            if (card.skipped === 'quiet') {
+              setMessage({ ok: true, text: label('tryQuiet') })
+              return
+            }
+            setMessage({ ok: true, text: label('tryShown') })
+          })
+          .catch((error) => {
+            setTryBusy(null)
+            const prefix = typeof t === 'function' ? t('tryFailed') : 'cannot show a sample: '
             setMessage({ ok: false, text: prefix + String((error && error.message) || error) })
           })
       }
@@ -1072,8 +1160,11 @@ window.__ModuleLoader__.load({
         return input
       }
 
-      const groups = GROUPS.map((group) => {
-        const rows = FIELDS.filter((field) => field.group === group).map((field) =>
+      // 一张分组卡片。allowed 有值时只渲染其中的键（用于把 digest 组拆成「常用」与「高级」两半）。
+      const groupCard = (group, allowed, withExtras) => {
+        const rows = FIELDS.filter(
+          (field) => field.group === group && (allowed === undefined || allowed.includes(field.key)),
+        ).map((field) =>
           h(
             'div',
             { className: 'drn-row', key: field.key },
@@ -1088,7 +1179,7 @@ window.__ModuleLoader__.load({
             h('div', { className: 'drn-control' }, control(field)),
           ),
         )
-        if (group === 'history') {
+        if (withExtras !== false && group === 'history') {
           const label = typeof t === 'function' ? t : (key) => key
           rows.push(
             h(
@@ -1132,7 +1223,7 @@ window.__ModuleLoader__.load({
             )
           }
         }
-        if (group === 'digest') {
+        if (withExtras !== false && group === 'digest') {
           const label = typeof t === 'function' ? t : (key) => key
           rows.push(
             h(
@@ -1149,19 +1240,19 @@ window.__ModuleLoader__.load({
                 { className: 'drn-pick' },
                 h(
                   'button',
-                  { type: 'button', className: 'drn-btn small', disabled: digestBusy, onClick: refreshDigest },
+                  { type: 'button', className: 'drn-btn drn-digest-btn', disabled: digestBusy, onClick: refreshDigest },
                   label('digestRefresh'),
                 ),
                 h(
                   'button',
-                  { type: 'button', className: 'drn-btn small', disabled: digestBusy, onClick: sendDigest },
+                  { type: 'button', className: 'drn-btn drn-digest-btn', disabled: digestBusy, onClick: sendDigest },
                   label(digestBusy ? 'digestSending' : 'digestSend'),
                 ),
               ),
             ),
           )
         }
-        if (group === 'balance') {
+        if (withExtras !== false && group === 'balance') {
           rows.push(
             h(
               'div',
@@ -1198,7 +1289,75 @@ window.__ModuleLoader__.load({
           h('div', { className: 'drn-group-title' }, typeof t === 'function' ? t(GROUP_LABELS[group]) : group),
           rows,
         )
+      }
+
+      const label = typeof t === 'function' ? t : (key) => key
+
+      // 一句话状态：让人不开任何折叠就知道现在是「哪儿、多久、有没有声、推送/日报开没开」。
+      const summaryText = () => {
+        const posKey = values.position === 'center' ? 'positionCenter' : values.position === 'tr' ? 'positionTr' : 'positionBr'
+        const sound = values.sound === false ? label('soundOff') : label('soundOn')
+        const secs = values.seconds === undefined || values.seconds === null ? 60 : values.seconds
+        const parts = [`${label(posKey)} · ${secs}${label('secondsUnit')} · ${sound}`]
+        if (values.pushEnabled === true) {
+          const fmt =
+            values.pushFormat === 'serverchan'
+              ? 'pushFormatServerchan'
+              : values.pushFormat === 'json'
+                ? 'pushFormatJson'
+                : values.pushFormat === 'text'
+                  ? 'pushFormatText'
+                  : 'pushFormatWecom'
+          parts.push(`${label('pushEnabled')} · ${label(fmt)}`)
+        }
+        if (values.digestEnabled === true) parts.push(`${label('digestEnabled')} · ${values.digestTime || '09:00'}`)
+        return label('summaryPrefix') + parts.join(' · ')
+      }
+
+      const common = [groupCard('basic'), groupCard('digest', COMMON_DIGEST, true)]
+
+      const advanced = ADV_BLOCKS.map((block) => {
+        const open = openBlocks[block.id] === true
+        const children = block.groups.map((group) =>
+          group === 'digest' ? groupCard('digest', ADV_DIGEST, false) : groupCard(group),
+        )
+        return h(
+          'div',
+          { className: 'drn-fold', key: 'fold-' + block.id },
+          h(
+            'button',
+            {
+              type: 'button',
+              className: 'drn-fold-head',
+              onClick: () => setOpenBlocks(Object.assign({}, openBlocks, { [block.id]: !open })),
+            },
+            h('span', null, label(block.label)),
+            h('span', { className: 'drn-chevron' }, open ? '▾ ' + label('foldCollapse') : '▸ ' + label('foldExpand')),
+          ),
+          h('div', { className: 'drn-fold-body', style: open ? undefined : { display: 'none' } }, children),
+        )
       })
+
+      const tryRow = h(
+        'div',
+        { className: 'drn-try' },
+        h('span', { className: 'drn-try-title' }, label('tryTitle')),
+        h(
+          'button',
+          { type: 'button', className: 'drn-btn drn-try-btn', disabled: tryBusy !== null, onClick: () => tryCard('done') },
+          label('tryDone'),
+        ),
+        h(
+          'button',
+          { type: 'button', className: 'drn-btn drn-try-btn', disabled: tryBusy !== null, onClick: () => tryCard('decide') },
+          label('tryDecide'),
+        ),
+        h(
+          'button',
+          { type: 'button', className: 'drn-btn drn-try-btn', disabled: tryBusy !== null, onClick: () => tryCard('raw') },
+          label('tryRaw'),
+        ),
+      )
 
       return h(
         'div',
@@ -1208,8 +1367,11 @@ window.__ModuleLoader__.load({
           { className: 'drn-head' },
           h('div', { className: 'drn-head-title' }, typeof t === 'function' ? t('title') : 'Desktop reminder settings'),
           h('div', { className: 'drn-head-intro' }, typeof t === 'function' ? t(writable ? 'intro' : 'readonly') : ''),
+          h('div', { className: 'drn-summary' }, summaryText()),
         ),
-        groups,
+        tryRow,
+        common,
+        advanced,
         h(
           'div',
           { className: 'drn-actions' },

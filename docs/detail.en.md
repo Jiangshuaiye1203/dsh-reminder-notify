@@ -6,19 +6,26 @@ The card host is the bundled `host/ReminderHost.ps1`, drawn with the system Powe
 
 ## Settings
 
-Open "Desktop reminder" in the Plugins page; the panel sits right under the description and has eight groups:
+The panel holds only what you might change; the instructions live on this page.
+
+**Three small things at the top**
+
+- A one-line status summary: position · duration · sound, plus `push · serverchan` and `digest · 09:00` when those are on
+- **Try it** — three buttons (done card / decision card / plain card) so you can check position, colours and sound
+  without waiting for a real reminder. Each sample closes itself in 20 seconds
+- **Save** / **Discard** at the bottom; saving applies immediately, no restart
+
+**Common groups** (open by default)
 
 - **Basics**: duration, position, sound on/off
-- **Sounds**: audio directory ("Browse…" picks a directory), the three per-kind file names (wav / mp3). Once a directory is picked the dropdown lists the audio files in it.
-- **Look**: background image, title icon, accent colours, title/message templates (`{title}` `{message}` `{kind}` `{time}`), plus per-kind overrides for background, icon and templates
+- **Digest & push**: push switch, URL, format, digest switch, digest time; below it today's digest preview and a "send one now" button
+
+**Advanced** (collapsed; click the header to expand)
+
+- **Look**: background image, title icon, accent colours, title/message templates (`{title}` `{message}` `{kind}` `{time}`), plus per-kind overrides
+- **Sounds**: audio directory ("Browse…"), the three per-kind file names (wav / mp3)
 - **Queue & quiet hours**: spoken alerts, card buttons, snooze minutes, queue on/off and limit, merge window, quiet hours and their behaviour, compact card on fullscreen
-- **History & stats**: record or not, entries kept, plus the total/today counts and the last 8 entries with "Refresh" and "Clear"
-- **Digest & push**: daily digest (switch, time, title, include balance, alert threshold) and phone push (switch, URL, format, whether decisions and the digest are pushed); the panel previews today's digest text and can send one right now
-- **Host**: script or exe host, script path, PowerShell path
-
-Changes apply on "Save" — no restart needed.
-
-- **DeepSeek balance**: enable, thresholds (20/10/5 % by default), check interval, spoken alerts; the panel can check now and set the current balance as the baseline
+- **History, balance & host**: history switch and kept entries (with counts, last 8 entries, refresh / clear), DeepSeek balance (thresholds, interval, spoken alerts, check now, set baseline), host (script or exe, script path, PowerShell path, per-kind cooldown)
 
 ## Digest and phone push (0.12+)
 
