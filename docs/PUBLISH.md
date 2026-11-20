@@ -12,7 +12,7 @@ DSH 的「插件市场 → 发现」页读的是**索引 URL**：一份 JSON（�
 | 索引地址（他人添加这个） | `https://jiangshuaiye1203.github.io/dsh-reminder-notify/publish/index.json` |
 | 站点首页 | https://jiangshuaiye1203.github.io/dsh-reminder-notify/ |
 | npm 包 | https://www.npmjs.com/package/dsh-reminder-notify |
-| 当前版本 | **0.11.0**，装源为 **npm**（`dsh-reminder-notify@0.11.0`），不再是 git 固定提交 |
+| 当前版本 | **0.12.0**，装源为 **npm**（`dsh-reminder-notify@0.12.0`），不再是 git 固定提交 |
 | Pages | Deploy from a branch，`main` / `(root)` |
 
 发新版（npm 源）：改代码 → 升 `package.json` 版本 → `scripts\publish-npm.cmd` 发布到 npm →
