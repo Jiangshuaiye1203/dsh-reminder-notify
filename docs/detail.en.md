@@ -6,16 +6,28 @@ The card host is the bundled `host/ReminderHost.ps1`, drawn with the system Powe
 
 ## Settings
 
-Open "Desktop reminder" in the Plugins page; the panel sits right under the description and has five groups:
+Open "Desktop reminder" in the Plugins page; the panel sits right under the description and has seven groups:
 
 - **Basics**: duration, position, sound on/off
 - **Sounds**: audio directory ("Browse…" picks a directory), the three per-kind file names (wav / mp3). Once a directory is picked the dropdown lists the audio files in it.
 - **Look**: background image, title icon, accent colours, title/message templates (`{title}` `{message}` `{kind}` `{time}`), plus per-kind overrides for background, icon and templates
+- **Queue & quiet hours**: spoken alerts, card buttons, snooze minutes, queue on/off and limit, merge window, quiet hours and their behaviour, compact card on fullscreen
+- **History & stats**: record or not, entries kept, plus the total/today counts and the last 8 entries with "Refresh" and "Clear"
 - **Host**: script or exe host, script path, PowerShell path
 
 Changes apply on "Save" — no restart needed.
 
 - **DeepSeek balance**: enable, thresholds (20/10/5 % by default), check interval, spoken alerts; the panel can check now and set the current balance as the baseline
+
+## Card behaviour (0.11+)
+
+- **Queue**: one card at a time; later reminders wait in a queue (`queueEnabled` / `queueMax`) instead of stacking.
+- **Merge**: the same kind fired again within `mergeWindowMs` (3 s by default) joins the queued entry — bodies are joined line by line, capped at 600 characters.
+- **Buttons**: "Got it" closes immediately; "Snooze" re-fires in `snoozeMinutes` (10 by default). Ignoring it just auto-closes.
+- **Quiet hours**: with `quietEnabled`, no "done" or plain reminders between `quietStart` and `quietEnd` (midnight crossing supported): `hold` delivers them after the window, `skip` drops them. **"Needs your call" always shows.**
+- **Fullscreen fallback**: a narrower card is drawn when a fullscreen app is in front (`compactOnFullscreen`).
+- **Speech**: `speakEnabled` reads title and body through `System.Speech` (needs a Chinese voice pack).
+- **History**: every reminder result is appended (auto-close / card click / got it / snoozed / quiet-skip) to `~/.dsh/dsh-reminder-notify/history.json`, trimmed to `historyLimit`. The panel shows totals, the last 8 entries, and a Clear button.
 
 ## DeepSeek balance alerts
 

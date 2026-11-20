@@ -11,6 +11,7 @@
 
 import { spawn } from 'node:child_process'
 import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -74,6 +75,21 @@ export const Config = z === null ? undefined : z.object({
   balanceBaselineAt: z.number().default(0).description('内部状态：基线设定的时间（毫秒时间戳）').volatile(),
   balanceBaselineAccount: z.string().default('').description('内部状态：基线属于哪个账号（平台用户 id），换号自动重来').volatile(),
   balanceBaselineSource: z.string().default('').description('内部状态：基线来源（auto = 自动取余额，manual = 手动设定）').volatile(),
+  speakEnabled: z.boolean().default(false).description('弹卡时用系统语音把正文念出来（默认关，避免连环打扰）').volatile(),
+  buttonsEnabled: z.boolean().default(true).description('卡片上显示「知道了 / 稍后提醒」两个按钮').volatile(),
+  snoozeMinutes: z.number().min(1).max(240).step(1).default(10).description('点「稍后提醒」后多少分钟再弹（1–240）').volatile(),
+  queueEnabled: z.boolean().default(true).description('同一时刻只显示一张卡，其余排队，避免叠成一堆').volatile(),
+  queueMax: z.number().min(1).max(20).step(1).default(5).description('最多同时排几条（1–20），超出丢弃最旧的').volatile(),
+  mergeWindowMs: z.number().min(0).max(60000).step(500).default(3000).description('同档位提醒在这个窗口内合并成一条（毫秒，0 = 不合并）').volatile(),
+  quietEnabled: z.boolean().default(false).description('开启免打扰时段（decide 档位永远不吞）').volatile(),
+  quietStart: z.string().default('22:00').description('免打扰开始时间，HH:MM').volatile(),
+  quietEnd: z.string().default('08:00').description('免打扰结束时间，HH:MM（可跨零点）').volatile(),
+  quietMode: z.union(['hold', 'skip']).default('hold').description('免打扰期间：hold = 攒到时段结束再弹，skip = 直接丢弃').volatile(),
+  compactOnFullscreen: z.boolean().default(true).description('检测到全屏程序（游戏 / 视频）时自动缩成一条小卡片').volatile(),
+  historyEnabled: z.boolean().default(true).description('记录提醒历史（本地 JSON），供插件页看统计').volatile(),
+  historyLimit: z.number().min(20).max(2000).step(10).default(200).description('历史最多保留多少条（20–2000）').volatile(),
+  historyFile: z.string().default('').description('历史文件路径，留空 = <用户目录>\\.dsh\\dsh-reminder-notify\\history.json').volatile(),
+  dryRun: z.boolean().default(false).description('调试用：只试算参数、不真的弹窗（自检脚本会打开它）').volatile(),
 })
 
 const PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)))
@@ -187,6 +203,21 @@ function settingsOf(config) {
     balanceBaselineAt: Math.max(0, num(c.balanceBaselineAt, 0)),
     balanceBaselineAccount: str(c.balanceBaselineAccount, ''),
     balanceBaselineSource: str(c.balanceBaselineSource, ''),
+    speakEnabled: c.speakEnabled === true,
+    buttonsEnabled: c.buttonsEnabled !== false,
+    snoozeMinutes: Math.round(clamp(num(c.snoozeMinutes, 10), 1, 240)),
+    queueEnabled: c.queueEnabled !== false,
+    queueMax: Math.round(clamp(num(c.queueMax, 5), 1, 20)),
+    mergeWindowMs: Math.max(0, Math.round(num(c.mergeWindowMs, 3000))),
+    quietEnabled: c.quietEnabled === true,
+    quietStart: str(c.quietStart, '22:00'),
+    quietEnd: str(c.quietEnd, '08:00'),
+    quietMode: str(c.quietMode, 'hold') === 'skip' ? 'skip' : 'hold',
+    compactOnFullscreen: c.compactOnFullscreen !== false,
+    historyEnabled: c.historyEnabled !== false,
+    historyLimit: Math.round(clamp(num(c.historyLimit, 200), 20, 2000)),
+    historyFile: str(c.historyFile, ''),
+    dryRun: c.dryRun === true,
   }
 }
 
@@ -275,7 +306,8 @@ function launch(file, argv, cwd) {
   })
 }
 
-function argvOfScriptHost(title, message, seconds, position, accent, audioPath, sound, extras) {
+function argvOfScriptHost(o) {
+  // 参数用数组逐项传，不拼字符串：中文、空格、括号都不需要转义。
   const argv = [
     '-NoProfile',
     '-NonInteractive',
@@ -284,23 +316,228 @@ function argvOfScriptHost(title, message, seconds, position, accent, audioPath, 
     '-WindowStyle',
     'Hidden',
     '-File',
-    null, // 由调用方填入脚本路径
+    o.scriptPath,
     '-Title',
-    psSafe(title),
+    psSafe(o.title),
     '-Msg',
-    psSafe(message),
+    psSafe(o.message),
     '-Seconds',
-    String(seconds),
+    String(o.seconds),
     '-Pos',
-    position,
+    o.position,
     '-Accent',
-    accent,
+    o.accent,
   ]
-  if (sound && audioPath !== '') argv.push('-Audio', audioPath)
+  if (o.sound && o.audioPath !== '') argv.push('-Audio', o.audioPath)
   else argv.push('-NoSound')
-  if (extras && extras.background) argv.push('-Background', extras.background)
-  if (extras && extras.icon) argv.push('-Icon', extras.icon)
+  if (o.background) argv.push('-Background', o.background)
+  if (o.icon) argv.push('-Icon', o.icon)
+  if (o.speak) argv.push('-Speak', psSafe(o.speak))
+  if (o.resultPath) argv.push('-ResultPath', o.resultPath)
+  if (o.buttonsEnabled === false) argv.push('-NoButtons')
+  else argv.push('-SnoozeMinutes', String(o.snoozeMinutes))
+  if (o.compact) argv.push('-Compact')
+  if (o.autoCompact) argv.push('-AutoCompact')
+  if (o.queueLeft > 0) argv.push('-QueueLeft', String(o.queueLeft))
   return argv
+}
+
+// ——— 提醒队列 ————————————————————————————————————————————————————
+//
+// 一次只放一张卡。模型有时会在一轮里连发两三条提醒，直接 spawn 会在屏幕角上叠一摞，
+// 谁也看不清；所以这里排一个先进先出的队列：
+//   · 同一档位在 mergeWindowMs 内到的第二条，直接并进排队中的那一条（正文换行追加）；
+//   · 卡片关掉之后再放下一张，卡上会写「还有 N 条」；
+//   · 用户点「稍后提醒」，这条隔 snoozeMinutes 再回到队尾。
+const queue = []
+let active = null
+
+function historyPathOf(settings) {
+  if (settings.historyFile !== '') return path.resolve(settings.historyFile)
+  return path.join(os.homedir(), '.dsh', 'dsh-reminder-notify', 'history.json')
+}
+
+function readHistory(settings) {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(historyPathOf(settings), 'utf8'))
+    return Array.isArray(parsed) ? parsed : []
+  } catch {
+    return []
+  }
+}
+
+function writeHistory(settings, list) {
+  const file = historyPathOf(settings)
+  fs.mkdirSync(path.dirname(file), { recursive: true })
+  fs.writeFileSync(file, JSON.stringify(list), 'utf8')
+}
+
+function appendHistory(settings, entry) {
+  if (!settings.historyEnabled) return
+  try {
+    const list = readHistory(settings)
+    list.push(entry)
+    const limit = settings.historyLimit
+    writeHistory(settings, list.length > limit ? list.slice(list.length - limit) : list)
+  } catch {
+    // 历史写不进去不影响弹卡本身
+  }
+}
+
+// "22:00" → 1320（当天第几分钟）；解析不出来返回 null。
+export function parseClock(text) {
+  const found = /^(\d{1,2}):(\d{2})$/.exec(String(text ?? '').trim())
+  if (found === null) return null
+  const hours = Number(found[1])
+  const minutes = Number(found[2])
+  if (hours > 23 || minutes > 59) return null
+  return hours * 60 + minutes
+}
+
+export function inQuietHours(settings, now = new Date()) {
+  if (!settings.quietEnabled) return false
+  const start = parseClock(settings.quietStart)
+  const end = parseClock(settings.quietEnd)
+  if (start === null || end === null || start === end) return false
+  const clock = now.getHours() * 60 + now.getMinutes()
+  // 跨零点的时段（22:00 → 08:00）用 or 判断
+  return start < end ? clock >= start && clock < end : clock >= start || clock < end
+}
+
+export function quietEndAt(settings, now = new Date()) {
+  const end = parseClock(settings.quietEnd)
+  if (end === null) return 0
+  const at = new Date(now.getTime())
+  at.setHours(Math.floor(end / 60), end % 60, 0, 0)
+  if (at.getTime() <= now.getTime()) at.setDate(at.getDate() + 1)
+  return at.getTime()
+}
+
+function enqueue(item) {
+  const settings = item.settings
+  if (!settings.queueEnabled) {
+    // 关掉排队：立刻弹，仍然记一条历史
+    active = item
+    showItem(item).catch(() => {}).finally(() => {
+      active = null
+      pump()
+    })
+    return { queued: false, position: 0 }
+  }
+  const now = Date.now()
+  if (settings.mergeWindowMs > 0) {
+    const pending = queue.find(
+      (other) =>
+        other.kind === item.kind &&
+        (other.holdUntil ?? 0) === 0 &&
+        now - other.createdAt <= settings.mergeWindowMs,
+    )
+    if (pending !== undefined) {
+      pending.count += 1
+      const merged = `${pending.message}\n${item.message}`.slice(0, 600)
+      pending.message = merged
+      return { queued: true, merged: true, position: queue.indexOf(pending) + 1, count: pending.count }
+    }
+  }
+  queue.push(item)
+  while (queue.length > settings.queueMax) queue.shift()
+  pump()
+  // pump() 可能已经把它直接放上屏（队列原本是空的），那种情况不算"排队"。
+  const showing = active === item
+  return { queued: !showing, position: queue.indexOf(item) + 1 }
+}
+
+function pump() {
+  if (active !== null) return
+  const now = Date.now()
+  const index = queue.findIndex((item) => (item.holdUntil ?? 0) <= now)
+  if (index < 0) {
+    // 全都在免打扰时段里攒着：睡到最早那一条的放行时间再看
+    const next = queue.reduce((min, item) => Math.min(min, item.holdUntil ?? Infinity), Infinity)
+    if (Number.isFinite(next)) {
+      const timer = setTimeout(() => pump(), Math.max(1000, Math.min(next - now, 60 * 60 * 1000)))
+      if (typeof timer.unref === 'function') timer.unref()
+    }
+    return
+  }
+  const [item] = queue.splice(index, 1)
+  active = item
+  showItem(item)
+    .catch(() => {})
+    .finally(() => {
+      active = null
+      pump()
+    })
+}
+
+async function showItem(item) {
+  const settings = item.settings
+  const scriptPath = path.resolve(settings.scriptPath)
+  if (!fs.existsSync(scriptPath)) return
+  const extras = appearanceOf(item.kind, settings)
+  const queueLeft = queue.filter((other) => (other.holdUntil ?? 0) <= Date.now()).length
+  const resultFile = path.join(
+    os.tmpdir(),
+    `dsh-reminder-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.json`,
+  )
+  const argv = argvOfScriptHost({
+    scriptPath,
+    title: item.title,
+    message: item.message,
+    seconds: item.seconds,
+    position: settings.position,
+    accent: accentOf(item.kind, settings),
+    audioPath: item.audioPath,
+    sound: item.sound,
+    background: extras.background,
+    icon: extras.icon,
+    speak: item.speak,
+    resultPath: resultFile,
+    buttonsEnabled: settings.buttonsEnabled,
+    snoozeMinutes: settings.snoozeMinutes,
+    autoCompact: settings.compactOnFullscreen,
+    queueLeft,
+  })
+  let action = 'unknown'
+  try {
+    const { exited } = await launch(settings.powershellPath, argv, PACKAGE_ROOT)
+    await exited
+  } catch {
+    // spawn 失败就当作没弹出来，记录一条便于排查
+  }
+  try {
+    const parsed = JSON.parse(fs.readFileSync(resultFile, 'utf8'))
+    if (parsed !== null && typeof parsed === 'object' && typeof parsed.action === 'string') {
+      action = parsed.action
+      if (action === 'snooze') {
+        const minutes = Math.round(clamp(num(parsed.snooze, settings.snoozeMinutes), 1, 240))
+        const timer = setTimeout(() => {
+          queue.unshift({ ...item, createdAt: Date.now(), snoozed: true, count: 1, holdUntil: 0 })
+          pump()
+        }, minutes * 60 * 1000)
+        if (typeof timer.unref === 'function') timer.unref()
+      }
+    }
+  } catch {
+    // 没有结果文件（比如宿主被杀）时按 unknown 记
+  }
+  try {
+    fs.unlinkSync(resultFile)
+  } catch {
+    // 清不掉就算了，文件名带 pid + 时间戳不会互相覆盖
+  }
+  item.action = action
+  appendHistory(settings, {
+    at: Date.now(),
+    kind: item.kind,
+    title: item.title,
+    message: item.message,
+    action,
+    count: item.count ?? 1,
+    snoozed: item.snoozed === true,
+    quiet: item.quiet === true,
+  })
+  return action
 }
 
 async function notify(kind, args, settings) {
@@ -319,6 +556,7 @@ async function notify(kind, args, settings) {
   const seconds = Math.round(clamp(num(args.seconds, settings.seconds), 2, 600))
   const sound = args.sound === false ? false : settings.sound
   const audio = audioNameOf(kind, settings)
+  const speak = str(args.speak, settings.speakEnabled ? message : '')
 
   if (settings.hostMode === 'exe') {
     const dir = clientDirOf(settings)
@@ -365,27 +603,24 @@ async function notify(kind, args, settings) {
     }
   }
   const audioDir = path.resolve(settings.audioDir)
-  const audioPath = sound && audio !== '' ? path.join(audioDir, audio) : ''
-  const speak = str(args.speak, '')
+  let audioPath = sound && audio !== '' ? path.join(audioDir, audio) : ''
+  let audioMissing
   if (audioPath !== '' && !fs.existsSync(audioPath)) {
     // 音频缺失不该让提醒消失：退回静音，正文照常弹。
-    return await fireScript(settings, title, message, seconds, kind, '', false, scriptPath, audioPath, speak)
+    audioMissing = audioPath
+    audioPath = ''
   }
-  return await fireScript(settings, title, message, seconds, kind, audioPath, sound, scriptPath, '', speak)
-}
 
-async function fireScript(settings, title, message, seconds, kind, audioPath, sound, scriptPath, missingAudio, speak) {
+  // 免打扰：decide 是「要人来拍板」的，任何时段都不能吞；其余档位按 quietMode 处理。
+  const quiet = kind !== 'decide' && inQuietHours(settings)
   const extras = appearanceOf(kind, settings)
-  const argv = argvOfScriptHost(title, message, seconds, settings.position, accentOf(kind, settings), audioPath, sound, extras)
-  argv[argv.indexOf(null)] = scriptPath
-  if (typeof speak === 'string' && speak !== '') argv.push('-Speak', psSafe(speak))
-  try {
-    const { pid, exited } = await launch(settings.powershellPath, argv, PACKAGE_ROOT)
-    // Add-Type 编译 C# 需要几百毫秒，所以等 900ms 才能发现「参数错、起不来」的情况。
-    const early = await Promise.race([exited, new Promise((r) => setTimeout(() => r('running'), 900))])
+
+  // 自检 / 调参用：只把将要传给宿主的参数算出来，不落任何进程、不写历史。
+  if (settings.dryRun) {
     return {
       ok: true,
       hostMode: 'script',
+      dryRun: true,
       kind,
       title,
       message,
@@ -393,15 +628,74 @@ async function fireScript(settings, title, message, seconds, kind, audioPath, so
       position: settings.position,
       sound: sound && audioPath !== '',
       audio: sound && audioPath !== '' ? audioPath : null,
-      audioMissing: missingAudio !== '' ? missingAudio : undefined,
+      audioMissing: audioMissing !== '' && audioMissing !== undefined ? audioMissing : undefined,
+      speak: speak !== '' ? speak : null,
       background: extras.background !== '' ? extras.background : null,
       icon: extras.icon !== '' ? extras.icon : null,
-      pid,
-      host: scriptPath,
-      earlyExit: early === 'running' ? null : early,
+      quiet,
     }
-  } catch (error) {
-    return { ok: false, error: 'spawn-failed', detail: String(error && error.message ? error.message : error) }
+  }
+
+  if (quiet && settings.quietMode === 'skip') {
+    appendHistory(settings, {
+      at: Date.now(),
+      kind,
+      title,
+      message,
+      action: 'quiet-skip',
+      count: 1,
+      snoozed: false,
+      quiet: true,
+    })
+    return {
+      ok: true,
+      hostMode: 'script',
+      kind,
+      title,
+      message,
+      skipped: 'quiet',
+      quietRange: `${settings.quietStart}-${settings.quietEnd}`,
+    }
+  }
+  const holdUntil = quiet ? quietEndAt(settings) : 0
+
+  const item = {
+    kind,
+    title,
+    message,
+    seconds,
+    sound: sound && audioPath !== '',
+    audioPath,
+    audioMissing,
+    speak,
+    settings,
+    createdAt: Date.now(),
+    count: 1,
+    snoozed: false,
+    quiet,
+    holdUntil,
+  }
+  const placement = enqueue(item)
+  return {
+    ok: true,
+    hostMode: 'script',
+    kind,
+    title,
+    message,
+    seconds,
+    position: settings.position,
+    sound: sound && audioPath !== '',
+    audio: sound && audioPath !== '' ? audioPath : null,
+    audioMissing: audioMissing !== '' && audioMissing !== undefined ? audioMissing : undefined,
+    speak: speak !== '' ? speak : null,
+    background: extras.background !== '' ? extras.background : null,
+    icon: extras.icon !== '' ? extras.icon : null,
+    queued: placement.queued === true || placement.merged === true,
+    merged: placement.merged === true ? true : undefined,
+    position_in_queue: placement.position,
+    count: placement.count,
+    quiet: quiet || undefined,
+    holdUntil: holdUntil > 0 ? new Date(holdUntil).toISOString() : undefined,
   }
 }
 
@@ -418,6 +712,11 @@ const parameters = {
     title: { type: 'string', description: '弹窗标题。不传时按档位使用默认标题。' },
     seconds: { type: 'number', description: '弹窗停留秒数，2–600。不传用插件 Config 的 seconds（默认 60）。' },
     sound: { type: 'boolean', description: '本次是否播放提示音。不传用插件 Config 的 sound（默认开）。' },
+    speak: {
+      type: 'string',
+      description:
+        '用系统语音念出来的句子（不弹窗也能念）。不传时：插件里开了「语音朗读」就念正文，否则不念。',
+    },
   },
 }
 
@@ -428,6 +727,7 @@ function toolDefinition(getSettings) {
       "Pop a native desktop reminder (voice + toast, bottom-right, auto-dismiss, never steals focus) on the user's Windows screen, then return immediately. " +
       'It renders the card with the system PowerShell + WinForms host shipped in this plugin, so nothing is downloaded and no unsigned exe is involved. ' +
       'Use kind="done" when a piece of work is finished and handed off, and kind="decide" before asking the user to approve or choose something. ' +
+      'Cards carry 「知道了 / 稍后提醒」 buttons; extra cards queue instead of stacking, and every reminder lands in the local history. ' +
       'This replaces running 发送提醒.ps1 -Voice 完成/决定 by hand: do not spawn a reminder host yourself, and do not call this in a loop.',
     parameters,
     output: {
@@ -457,6 +757,7 @@ const AUDIO_ROUTE = '/dsh-reminder-notify/audio'
 const CONFIG_ROUTE = '/dsh-reminder-notify/config'
 const PREVIEW_ROUTE = '/dsh-reminder-notify/preview'
 const BALANCE_ROUTE = '/dsh-reminder-notify/balance'
+const HISTORY_ROUTE = '/dsh-reminder-notify/history'
 
 // 面板要「把音频目录里的文件列成下拉」，但 Client 侧没有任何读文件能力，
 // 所以由 Host 注册一条只读的 GET 路由，页面用同源 fetch 取这个 JSON。
@@ -943,11 +1244,97 @@ function registerBalanceRoute(ctx, getSettings, config) {
   void config
 }
 
+// ——— 提醒历史 ————————————————————————————————————————————————————
+//
+// 存在本地 JSON（默认 <用户目录>/.dsh/dsh-reminder-notify/history.json），
+// 面板只读这条路由，不直接读文件 —— Client 侧没有任何文件访问能力。
+export function historyStats(entries) {
+  const byKind = { done: 0, decide: 0, raw: 0 }
+  const byAction = {}
+  const dayKey = (ms) => {
+    const d = new Date(ms)
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  }
+  const buckets = new Map()
+  for (let i = 6; i >= 0; i -= 1) {
+    const d = new Date()
+    d.setDate(d.getDate() - i)
+    buckets.set(dayKey(d.getTime()), 0)
+  }
+  const today = dayKey(Date.now())
+  let todayCount = 0
+  for (const entry of entries) {
+    if (entry === null || typeof entry !== 'object') continue
+    const kind = String(entry.kind ?? '')
+    if (byKind[kind] !== undefined) byKind[kind] += 1
+    const action = String(entry.action ?? 'unknown')
+    byAction[action] = (byAction[action] ?? 0) + 1
+    const key = dayKey(num(entry.at, 0))
+    if (key === today) todayCount += 1
+    if (buckets.has(key)) buckets.set(key, buckets.get(key) + 1)
+  }
+  return {
+    total: entries.length,
+    today: todayCount,
+    byKind,
+    byAction,
+    last7: [...buckets.entries()].map(([date, count]) => ({ date, count })),
+  }
+}
+
+function registerHistoryRoute(ctx, getSettings) {
+  const web = typeof ctx.get === 'function' ? ctx.get('webServer') : undefined
+  if (web === undefined || web === null || typeof web.register !== 'function') {
+    ctx.logger?.warn?.('dsh-reminder-notify: webServer is unavailable, the history panel stays hidden')
+    return
+  }
+  const reply = (res, status, payload) => {
+    res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+    res.end(JSON.stringify(payload))
+  }
+  const route = {
+    kind: 'exact',
+    path: HISTORY_ROUTE,
+    handler: async (req, res) => {
+      try {
+        const settings = getSettings()
+        const method = (req.method ?? 'GET').toUpperCase()
+        if (method === 'GET') {
+          const entries = readHistory(settings)
+          return reply(res, 200, {
+            ok: true,
+            enabled: settings.historyEnabled,
+            file: historyPathOf(settings),
+            stats: historyStats(entries),
+            entries: entries.slice(-50).reverse(),
+          })
+        }
+        if (method !== 'POST') return reply(res, 405, { ok: false, error: 'use GET or POST' })
+        const body = await readJsonBody(req)
+        if (body !== null && typeof body === 'object' && body.mode === 'clear') {
+          writeHistory(settings, [])
+          return reply(res, 200, { ok: true, cleared: true, file: historyPathOf(settings) })
+        }
+        return reply(res, 400, { ok: false, error: 'unknown mode' })
+      } catch (error) {
+        return reply(res, 500, { ok: false, error: String(error?.message ?? error) })
+      }
+    },
+  }
+  ctx.effect(() => {
+    const dispose = web.register(route)
+    return () => {
+      if (typeof dispose === 'function') dispose()
+    }
+  }, 'dsh-reminder-notify: history route')
+}
+
 export function apply(ctx, config) {
   registerAudioRoute(ctx, () => settingsOf(config))
   registerConfigRoute(ctx, () => settingsOf(config))
   registerPreviewRoute(ctx, () => settingsOf(config))
   registerBalanceRoute(ctx, () => settingsOf(config), config)
+  registerHistoryRoute(ctx, () => settingsOf(config))
   const tools = typeof ctx.get === 'function' ? ctx.get('tools') : ctx.tools
   if (tools === undefined || tools === null || typeof tools.register !== 'function') {
     ctx.logger?.warn?.('dsh-reminder-notify: tools service is unavailable, notify_user was not registered')

@@ -1,4 +1,5 @@
 // 自检：不启动 DSH，用假 ctx 把插件当普通模块跑一遍，真的弹一次提醒。
+import fs from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { apply, checkBalance, listAudioFiles, parseThresholds, previewAudio } from './index.js'
 
@@ -25,7 +26,11 @@ const ctx = makeCtx((definition) => {
   captured = definition
 })
 
-apply(ctx, { seconds: 8, position: 'br', sound: true, cooldownMs: 1500 })
+import os from 'node:os'
+import path from 'node:path'
+const historyFile = path.join(os.tmpdir(), 'drn-selftest-history.json')
+try { fs.unlinkSync(historyFile) } catch {}
+apply(ctx, { seconds: 4, position: 'br', sound: true, cooldownMs: 1500, historyFile })
 if (!captured) throw new Error('tool was not registered')
 console.log('registered:', captured.name, '| params:', Object.keys(captured.parameters.properties).join(','))
 
@@ -38,6 +43,33 @@ console.log('cooldown ->', second)
 const raw = await captured.execute({ kind: 'raw', title: '自检 raw', message: 'raw 档位，不带语音。', sound: false, seconds: 5 })
 console.log('raw ->', raw)
 
+// 队列 / 合并：第一张卡还在屏上时，同档位的第二条应该并进排队中的那一条。
+const burstA = JSON.parse(await captured.execute({ kind: 'decide', message: '排队 A', sound: false }))
+// 等过冷却窗口（1500ms）、但仍在合并窗口（3000ms）内，验证"合并"而不是"被冷却拦下"
+await new Promise((resolve) => setTimeout(resolve, 1700))
+const burstB = JSON.parse(await captured.execute({ kind: 'decide', message: '排队 B', sound: false }))
+console.log('queue ->', burstA.queued, burstA.position_in_queue, '|', burstB.merged, burstB.count)
+if (burstA.queued !== true) throw new Error('第二张卡没有排队：' + JSON.stringify(burstA))
+if (burstB.merged !== true || burstB.count !== 2) throw new Error('同档位没有合并：' + JSON.stringify(burstB))
+
+// 历史：第一张卡自动关掉时会把 action 写进历史文件。
+const historyDeadline = Date.now() + 25000
+let entries = []
+while (Date.now() < historyDeadline) {
+  try {
+    entries = JSON.parse(fs.readFileSync(historyFile, 'utf8'))
+  } catch {
+    entries = []
+  }
+  if (entries.length > 0) break
+  await new Promise((resolve) => setTimeout(resolve, 500))
+}
+if (entries.length === 0) throw new Error('历史里没有记录：' + historyFile)
+if (!['timeout', 'dismiss', 'ok', 'snooze'].includes(entries[0].action)) {
+  throw new Error('历史 action 不对：' + JSON.stringify(entries[0]))
+}
+console.log('history ok', entries.length, '|', entries[0].action, '|', entries[0].kind)
+
 // 模板：标题加档位前缀、正文追加时间；两处占位符都应在结果里被替换掉。
 let templated
 apply(
@@ -49,6 +81,7 @@ apply(
     position: 'br',
     sound: false,
     cooldownMs: 0,
+    dryRun: true,
     titleTemplate: '[{kind}] {title}',
     messageTemplate: '{message}（{time}）',
   },
@@ -70,6 +103,7 @@ apply(
     position: 'br',
     sound: false,
     cooldownMs: 0,
+    dryRun: true,
     cardBackground: 'assets/提示音导入/完成提醒语音.wav',
     doneCardBackground: 'assets/提示音导入/需要你来决定.wav',
   },
@@ -91,6 +125,7 @@ apply(
     position: 'br',
     sound: false,
     cooldownMs: 0,
+    dryRun: true,
     titleTemplate: '通用 {title}',
     doneTitleTemplate: '完成啦 → {title}',
     messageTemplate: '{message}',
@@ -114,7 +149,8 @@ console.log('audio-scan ok', scanned.files.join(' | '))
 // settingsOf() 必须解包，否则字符串会变成 "[object Object]"。
 const { Config } = await import("./index.js")
 if (Config === undefined) throw new Error("Config 没有导出，插件页不会有设置面板")
-const liveConfig = Config({ seconds: 90, sound: true, doneAudio: "完成提醒语音.wav", titleTemplate: "热更 {title}" })
+// cooldownMs: 0 —— 同档位冷却表是模块级的，前面刚跑过 done 档位，留着 1500ms 会把它拦成 skipped。
+const liveConfig = Config({ seconds: 90, sound: true, doneAudio: "完成提醒语音.wav", titleTemplate: "热更 {title}", dryRun: true, cooldownMs: 0 })
 if (typeof liveConfig.seconds?.get !== "function") throw new Error("Config 字段没有 volatile 包装，插件页拿不到设置面板")
 let live
 apply(

@@ -21,7 +21,17 @@ dsh plugin --profile desktop add link:<本目录绝对路径>
 | 要用户拍板 | `notify_user(kind="decide")` |
 | 自定义 | `notify_user(kind="raw", title="…", message="…", seconds=20, sound=false)` |
 
-返回值是 JSON（`pid`、`host`、`audio`、`hostMode`），失败也不抛异常。
+返回值是 JSON（`pid`、`host`、`audio`、`hostMode`、`queued` 等），失败也不抛异常。
+
+0.11 起卡片的行为：
+
+- 卡片右下角有「知道了」和「稍后提醒」（`buttonsEnabled`，默认开）；点「稍后」会过 `snoozeMinutes` 分钟再弹一次。
+- 多条提醒**排队**显示（`queueEnabled`）；同档位在 `mergeWindowMs` 内再次触发会**并进**排队中的那一条，不重复弹。
+- **免打扰时段**（`quietEnabled` + `quietStart`/`quietEnd`，`quietMode: hold|skip`）只压「完成」和普通提醒，「需要你来决定」照弹。
+- 前台是全屏应用时自动换窄卡片（`compactOnFullscreen`）。
+- `speakEnabled` 用系统语音把标题和正文念出来（需要中文语音包）。
+- 每条结果写进 `~/.dsh/dsh-reminder-notify/history.json`（`historyEnabled` / `historyLimit`），
+  插件页「历史与统计」里能看到总计 / 今日条数和最近记录，可以一键清空。
 
 ## 资产
 
@@ -46,6 +56,11 @@ dsh plugin --profile desktop add link:<本目录绝对路径>
 都在插件 Config 里（`cordis.patch.yml` / 插件页）：`seconds`（默认 60）、`position`（`br`/`center`/`tr`）、
 `sound`、`doneAudio`/`decideAudio`、`accentDone`/`accentDecide`/`accentRaw`、`cooldownMs`（默认 1500）。
 `hostMode` 切宿主实现，`scriptPath`/`powershellPath`/`audioDir` 一般不用动。
+
+0.11 新增：`speakEnabled`、`buttonsEnabled`、`snoozeMinutes`（10）、`queueEnabled`、`queueMax`（5）、
+`mergeWindowMs`（3000）、`quietEnabled`、`quietStart`（`22:00`）、`quietEnd`（`08:00`）、
+`quietMode`（`hold`/`skip`）、`compactOnFullscreen`、`historyEnabled`、`historyLimit`（200）、
+`historyFile`（留空 = `~/.dsh/dsh-reminder-notify/history.json`）。
 
 ## 已知限制
 

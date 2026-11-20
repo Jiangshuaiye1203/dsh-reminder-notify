@@ -130,6 +130,7 @@ try {
   // ---- 用假的 ctx 跑 apply，拿到注册的面板组件 ----
   let panel = null
   let zhDict = {}
+  let enDict = {}
   const ctx = {
     effect(factory) {
       const cleanup = factory()
@@ -143,6 +144,7 @@ try {
         assert.equal(ns, 'dsh-reminder-notify')
         assert.ok(dicts.zh && dicts.en, 'locale 需要 zh/en 两套字典')
         zhDict = dicts.zh
+        enDict = dicts.en
         return () => {}
       },
       bind() {
@@ -166,6 +168,33 @@ try {
 
   clientModule.apply(ctx)
   assert.ok(panel !== null, '没有注册 plugins.bundle.config 面板')
+
+  // ---- 0. 文案与字段对账：新增字段最容易漏的是字典键 ----
+  {
+    const zhKeys = Object.keys(zhDict).sort()
+    const enKeys = Object.keys(enDict).sort()
+    assert.deepEqual(zhKeys, enKeys, 'zh / en 字典键不一致：' + zhKeys.filter((k) => !enDict[k]).concat(enKeys.filter((k) => !zhDict[k])).join(','))
+
+    const fieldKeys = [...source.matchAll(/\{ key: '([A-Za-z0-9_]+)', group: '([A-Za-z]+)'/g)].map((m) => m[1])
+    assert.ok(fieldKeys.length > 30, '没有解析到 FIELDS：' + fieldKeys.length)
+    for (const key of fieldKeys) {
+      assert.ok(zhDict[key] !== undefined, 'FIELDS 字段缺少中文标签：' + key)
+      assert.ok(enDict[key] !== undefined, 'FIELDS 字段缺少英文标签：' + key)
+    }
+
+    const groupKeys = new Set([...source.matchAll(/group: '([A-Za-z]+)'/g)].map((m) => m[1]))
+    for (const group of groupKeys) {
+      assert.ok(zhDict['group' + group[0].toUpperCase() + group.slice(1)] !== undefined, '分组缺少中文标题：' + group)
+      assert.ok(enDict['group' + group[0].toUpperCase() + group.slice(1)] !== undefined, '分组缺少英文标题：' + group)
+    }
+
+    const hintKeys = [...source.matchAll(/: '([A-Za-z0-9_]+Hint)'/g)].map((m) => m[1])
+    for (const key of hintKeys) {
+      assert.ok(zhDict[key] !== undefined, '提示缺少中文：' + key)
+      assert.ok(enDict[key] !== undefined, '提示缺少英文：' + key)
+    }
+    console.log('dict-keys ok', fieldKeys.length, 'fields |', groupKeys.size, 'groups |', hintKeys.length, 'hints')
+  }
 
   const t = ctx.locale.bind('dsh-reminder-notify')
 

@@ -45,3 +45,30 @@
         accentRaw: '#4C8DFF'
         # 同档位提醒的最小间隔（毫秒），防止模型在同一轮重复调用
         cooldownMs: 1500
+        # ===== 0.11 新增 =====
+        # 用系统语音朗读卡片内容（需要中文语音包，没装就静音）
+        speakEnabled: false
+        # 卡片右下角显示「知道了 / 稍后提醒」按钮
+        buttonsEnabled: true
+        # 点「稍后提醒」后隔多久再弹（分钟）
+        snoozeMinutes: 10
+        # 多条提醒排队显示，不同时叠在屏幕上
+        queueEnabled: true
+        # 队列最多保留几条，超出的丢最旧的
+        queueMax: 5
+        # 同档位在这段时间内再次触发会并进排队中的那一条（毫秒，0 = 不合并）
+        mergeWindowMs: 3000
+        # 免打扰时段：到点不弹「完成」和普通提醒；「需要你来决定」不受影响
+        quietEnabled: false
+        quietStart: '22:00'
+        quietEnd: '08:00'
+        # hold = 留到时段结束后补弹；skip = 这段时间内直接跳过
+        quietMode: hold
+        # 前台是全屏应用时改用窄卡片
+        compactOnFullscreen: true
+        # 记录每条提醒的结果（自动关闭 / 点按钮 / 稍后 / 免打扰跳过）
+        historyEnabled: true
+        # 历史保留条数
+        historyLimit: 200
+        # 历史文件路径；留空 = ~/.dsh/dsh-reminder-notify/history.json
+        historyFile: ''

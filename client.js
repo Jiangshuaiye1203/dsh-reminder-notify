@@ -20,6 +20,8 @@ window.__ModuleLoader__.load({
     const AUDIO_KEYS = ['doneAudio', 'decideAudio', 'rawAudio']
     const PREVIEW_ROUTE = '/dsh-reminder-notify/preview'
     const BALANCE_ROUTE = '/dsh-reminder-notify/balance'
+    // 0.11 新增：提醒历史（GET 拿统计+最近记录，POST { mode: 'clear' } 清空）。
+    const HISTORY_ROUTE = '/dsh-reminder-notify/history'
     // 下拉按扩展名分组：wav 一组、mp3 一组……组内按文件名排序，一眼能看出格式。
     function groupAudioFiles(files) {
       const byExt = new Map()
@@ -244,6 +246,111 @@ window.__ModuleLoader__.load({
       secondsUnit: 's',
     }
 
+    // 0.11 新增文案：排队与合并、卡片按钮、免打扰、全屏降级、语音、历史与统计。
+    Object.assign(zh, {
+      groupQueue: '排队与免打扰',
+      groupHistory: '历史与统计',
+      speakEnabled: '朗读提醒内容',
+      buttonsEnabled: '卡片显示按钮',
+      snoozeMinutes: '「稍后提醒」延后分钟',
+      queueEnabled: '提醒排队显示',
+      queueMax: '排队上限',
+      mergeWindowMs: '合并窗口（毫秒）',
+      quietEnabled: '免打扰时段',
+      quietStart: '免打扰开始',
+      quietEnd: '免打扰结束',
+      quietMode: '免打扰处理方式',
+      quietModeHold: '留到结束后补弹',
+      quietModeSkip: '直接跳过',
+      compactOnFullscreen: '全屏时用紧凑卡片',
+      historyEnabled: '记录提醒历史',
+      historyLimit: '历史保留条数',
+      speakEnabledHint: '用系统语音把标题和正文念出来；要装中文语音包，没装就静音。',
+      buttonsEnabledHint: '卡片右下角给出「知道了」和「稍后提醒」；关掉就只剩自动关闭，点卡片仍可提前关。',
+      snoozeMinutesHint: '点「稍后提醒」后隔多久再弹一次。',
+      queueEnabledHint: '关掉后多条提醒会同时叠在屏幕上。',
+      queueMaxHint: '排队最多留几条，超出的丢掉最旧的。',
+      mergeWindowMsHint: '同档位在这段时间内再次触发，会并进排队中的那一条，不重复弹。',
+      quietEnabledHint: '时段内不再弹「完成」和普通提醒；「需要你来决定」不受影响。',
+      quietStartHint: '24 小时制，例如 22:00。',
+      quietEndHint: '跨零点会自动识别，例如 08:00。',
+      quietModeHint: '留到时段结束后补弹（holding），还是这段时间内直接不提醒。',
+      compactOnFullscreenHint: '检测到前台是全屏应用时改用窄卡片，少挡内容。',
+      historyEnabledHint: '每条提醒的结果都会记下来（自动关闭 / 点了按钮 / 稍后提醒 / 免打扰跳过）。',
+      historyLimitHint: '超过这个条数就丢掉最旧的记录。',
+      historyStatus: '提醒统计',
+      historyLoading: '读取中…',
+      historyUnavailable: '读不到历史文件：',
+      historyDisabled: '历史记录已关闭。',
+      historyTotalPrefix: '共 ',
+      historyTotalMid: ' 条 · 今天 ',
+      historyTotalSuffix: ' 条',
+      historyRefresh: '刷新',
+      historyRefreshing: '读取中…',
+      historyClear: '清空',
+      historyRecent: '最近记录',
+      historyKindDone: '完成',
+      historyKindDecide: '要你决定',
+      historyKindRaw: '普通',
+      historyActionTimeout: '自动关闭',
+      historyActionDismiss: '点了卡片',
+      historyActionOk: '知道了',
+      historyActionSnooze: '稍后提醒',
+      historyActionQuietSkip: '免打扰跳过',
+    })
+
+    Object.assign(en, {
+      groupQueue: 'Queue & quiet hours',
+      groupHistory: 'History & stats',
+      speakEnabled: 'Speak the reminder',
+      buttonsEnabled: 'Show card buttons',
+      snoozeMinutes: 'Snooze minutes',
+      queueEnabled: 'Queue reminders',
+      queueMax: 'Queue limit',
+      mergeWindowMs: 'Merge window (ms)',
+      quietEnabled: 'Quiet hours',
+      quietStart: 'Quiet from',
+      quietEnd: 'Quiet until',
+      quietMode: 'Quiet-hours behaviour',
+      quietModeHold: 'Hold until it ends',
+      quietModeSkip: 'Skip it',
+      compactOnFullscreen: 'Compact card on fullscreen',
+      historyEnabled: 'Keep reminder history',
+      historyLimit: 'History entries kept',
+      speakEnabledHint: 'Read the title and body with the system voice; needs a Chinese voice pack, otherwise silent.',
+      buttonsEnabledHint: 'Show “Got it” and “Snooze” on the card. Off means auto-dismiss only; clicking the card still closes it.',
+      snoozeMinutesHint: 'How long to wait before the snoozed reminder pops again.',
+      queueEnabledHint: 'Off means several reminders stack on screen at once.',
+      queueMaxHint: 'How many queued reminders to keep; the oldest are dropped.',
+      mergeWindowMsHint: 'Same-kind reminders within this window merge into the queued one instead of popping twice.',
+      quietEnabledHint: 'No “done” or plain reminders during this window; “needs your call” is never suppressed.',
+      quietStartHint: '24-hour clock, for example 22:00.',
+      quietEndHint: 'Midnight crossing is handled, for example 08:00.',
+      quietModeHint: 'Hold them until the window ends, or skip them entirely.',
+      compactOnFullscreenHint: 'Use a narrower card when a fullscreen app is in front.',
+      historyEnabledHint: 'Every reminder result is recorded (auto-close / button / snooze / quiet-skip).',
+      historyLimitHint: 'Older entries are dropped past this count.',
+      historyStatus: 'Reminder stats',
+      historyLoading: 'Reading…',
+      historyUnavailable: 'Cannot read the history file: ',
+      historyDisabled: 'History recording is off.',
+      historyTotalPrefix: '',
+      historyTotalMid: ' total · ',
+      historyTotalSuffix: ' today',
+      historyRefresh: 'Refresh',
+      historyRefreshing: 'Reading…',
+      historyClear: 'Clear',
+      historyRecent: 'Recent entries',
+      historyKindDone: 'done',
+      historyKindDecide: 'needs you',
+      historyKindRaw: 'plain',
+      historyActionTimeout: 'auto-closed',
+      historyActionDismiss: 'clicked',
+      historyActionOk: 'got it',
+      historyActionSnooze: 'snoozed',
+      historyActionQuietSkip: 'quiet-skip',
+    })
+
     const CSS = `
 .drn-panel { display: flex; flex-direction: column; gap: 18px; color: var(--dsw-alias-label-primary); }
 .drn-head { display: flex; flex-direction: column; gap: 4px; }
@@ -305,6 +412,20 @@ window.__ModuleLoader__.load({
       { key: 'balanceThresholds', group: 'balance', kind: 'text' },
       { key: 'balanceCheckMinutes', group: 'balance', kind: 'number' },
       { key: 'balanceSpeak', group: 'balance', kind: 'boolean' },
+      // 0.11：排队与合并、卡片按钮、免打扰、全屏降级、语音。
+      { key: 'speakEnabled', group: 'queue', kind: 'boolean' },
+      { key: 'buttonsEnabled', group: 'queue', kind: 'boolean' },
+      { key: 'snoozeMinutes', group: 'queue', kind: 'number' },
+      { key: 'queueEnabled', group: 'queue', kind: 'boolean' },
+      { key: 'queueMax', group: 'queue', kind: 'number' },
+      { key: 'mergeWindowMs', group: 'queue', kind: 'number' },
+      { key: 'quietEnabled', group: 'queue', kind: 'boolean' },
+      { key: 'quietStart', group: 'queue', kind: 'text' },
+      { key: 'quietEnd', group: 'queue', kind: 'text' },
+      { key: 'quietMode', group: 'queue', kind: 'select', options: ['hold', 'skip'], optionLabels: ['quietModeHold', 'quietModeSkip'] },
+      { key: 'compactOnFullscreen', group: 'queue', kind: 'boolean' },
+      { key: 'historyEnabled', group: 'history', kind: 'boolean' },
+      { key: 'historyLimit', group: 'history', kind: 'number' },
       { key: 'hostMode', group: 'host', kind: 'select', options: ['script', 'exe'], optionLabels: ['hostModeScript', 'hostModeExe'] },
       { key: 'scriptPath', group: 'host', kind: 'text' },
       { key: 'powershellPath', group: 'host', kind: 'text' },
@@ -338,10 +459,23 @@ window.__ModuleLoader__.load({
       balanceThresholds: 'balanceThresholdsHint',
       balanceCheckMinutes: 'balanceCheckHint',
       balanceSpeak: 'balanceSpeakHint',
+      speakEnabled: 'speakEnabledHint',
+      buttonsEnabled: 'buttonsEnabledHint',
+      snoozeMinutes: 'snoozeMinutesHint',
+      queueEnabled: 'queueEnabledHint',
+      queueMax: 'queueMaxHint',
+      mergeWindowMs: 'mergeWindowMsHint',
+      quietEnabled: 'quietEnabledHint',
+      quietStart: 'quietStartHint',
+      quietEnd: 'quietEndHint',
+      quietMode: 'quietModeHint',
+      compactOnFullscreen: 'compactOnFullscreenHint',
+      historyEnabled: 'historyEnabledHint',
+      historyLimit: 'historyLimitHint',
     }
 
-    const GROUPS = ['basic', 'audio', 'look', 'balance', 'host']
-    const GROUP_LABELS = { basic: 'groupBasic', audio: 'groupAudio', look: 'groupLook', balance: 'groupBalance', host: 'groupHost' }
+    const GROUPS = ['basic', 'audio', 'look', 'queue', 'history', 'balance', 'host']
+    const GROUP_LABELS = { basic: 'groupBasic', audio: 'groupAudio', look: 'groupLook', queue: 'groupQueue', history: 'groupHistory', balance: 'groupBalance', host: 'groupHost' }
 
     function sameValue(a, b) {
       return JSON.stringify(a) === JSON.stringify(b)
@@ -363,6 +497,8 @@ window.__ModuleLoader__.load({
       const [audio, setAudio] = React.useState({ dir: '', files: [], error: null })
       const [balance, setBalance] = React.useState(null)
       const [balanceBusy, setBalanceBusy] = React.useState(false)
+      const [history, setHistory] = React.useState(null)
+      const [historyBusy, setHistoryBusy] = React.useState(false)
 
       React.useEffect(() => {
         if (typeof fetch !== 'function') {
@@ -422,6 +558,7 @@ window.__ModuleLoader__.load({
       // 打开面板时读一次余额快照（不触发提醒，只是显示）。
       React.useEffect(() => {
         refreshBalance()
+        refreshHistory()
       }, [])
 
       if (props.view === 'summary') {
@@ -638,6 +775,61 @@ window.__ModuleLoader__.load({
         balanceFetch({ method: 'POST', headers: { 'content-type': 'application/json', accept: 'application/json' }, body: JSON.stringify({ mode: 'reset' }) })
       }
 
+      // 历史：GET 拿统计与最近记录，POST { mode: 'clear' } 清空。
+      function historyFetch(options) {
+        setHistoryBusy(true)
+        Promise.resolve()
+          .then(() => fetch(HISTORY_ROUTE, options))
+          .then((response) => (response && typeof response.json === 'function' ? response.json() : Promise.resolve(null)))
+          .then((data) => {
+            setHistoryBusy(false)
+            if (data && typeof data === 'object') setHistory(data)
+            else setHistory({ ok: false, error: 'empty-response' })
+          })
+          .catch((error) => {
+            setHistoryBusy(false)
+            setHistory({ ok: false, error: String((error && error.message) || error) })
+          })
+      }
+
+      function refreshHistory() {
+        historyFetch({ headers: { accept: 'application/json' } })
+      }
+
+      function clearHistory() {
+        historyFetch({ method: 'POST', headers: { 'content-type': 'application/json', accept: 'application/json' }, body: JSON.stringify({ mode: 'clear' }) })
+      }
+
+      function historyText() {
+        const label = typeof t === 'function' ? t : (key) => key
+        if (history === null) return label('historyLoading')
+        if (history.ok === false) {
+          return label('historyUnavailable') + (history.error ? '（' + String(history.error) + '）' : '')
+        }
+        if (history.enabled === false) return label('historyDisabled')
+        const stats = history.stats || {}
+        const total = Number(stats.total) || 0
+        const today = Number(stats.today) || 0
+        return label('historyTotalPrefix') + total + label('historyTotalMid') + today + label('historyTotalSuffix')
+      }
+
+      function entryText(entry) {
+        const label = typeof t === 'function' ? t : (key) => key
+        const kinds = { done: 'historyKindDone', decide: 'historyKindDecide', raw: 'historyKindRaw' }
+        const actions = {
+          timeout: 'historyActionTimeout',
+          dismiss: 'historyActionDismiss',
+          ok: 'historyActionOk',
+          snooze: 'historyActionSnooze',
+          'quiet-skip': 'historyActionQuietSkip',
+        }
+        const head = [shortTime(entry.at), label(kinds[entry.kind] || 'historyKindRaw'), label(actions[entry.action] || entry.action)]
+        if (entry.count > 1) head.push('×' + entry.count)
+        const text = String(entry.message || '').replace(/\s+/g, ' ').slice(0, 46)
+        if (text !== '') head.push(text)
+        return head.filter(Boolean).join(' · ')
+      }
+
       function control(field) {
         const value = effective[field.key]
         const disabled = !writable || busy
@@ -744,6 +936,50 @@ window.__ModuleLoader__.load({
             h('div', { className: 'drn-control' }, control(field)),
           ),
         )
+        if (group === 'history') {
+          const label = typeof t === 'function' ? t : (key) => key
+          rows.push(
+            h(
+              'div',
+              { className: 'drn-row', key: 'history-status' },
+              h(
+                'div',
+                { className: 'drn-row-main' },
+                h('div', { className: 'drn-label' }, label('historyStatus')),
+                h('div', { className: 'drn-hint' }, historyText()),
+              ),
+              h(
+                'div',
+                { className: 'drn-pick' },
+                h(
+                  'button',
+                  { type: 'button', className: 'drn-btn small', disabled: historyBusy, onClick: refreshHistory },
+                  label(historyBusy ? 'historyRefreshing' : 'historyRefresh'),
+                ),
+                h(
+                  'button',
+                  { type: 'button', className: 'drn-btn small', disabled: historyBusy, onClick: clearHistory },
+                  label('historyClear'),
+                ),
+              ),
+            ),
+          )
+          const entries = history && Array.isArray(history.entries) ? history.entries.slice(0, 8) : []
+          if (entries.length > 0) {
+            rows.push(
+              h(
+                'div',
+                { className: 'drn-row', key: 'history-list' },
+                h(
+                  'div',
+                  { className: 'drn-row-main' },
+                  h('div', { className: 'drn-label' }, label('historyRecent')),
+                  entries.map((entry, index) => h('div', { className: 'drn-hint', key: 'h' + index }, entryText(entry))),
+                ),
+              ),
+            )
+          }
+        }
         if (group === 'balance') {
           rows.push(
             h(
