@@ -1579,7 +1579,48 @@ function registerHistoryRoute(ctx, getSettings) {
   }, 'dsh-reminder-notify: history route')
 }
 
+/** Host 服务名：别的插件用 ctx.get('reminder') 拿它。 */
+export const SERVICE_NAME = 'reminder'
+
+function packageVersion() {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(PACKAGE_ROOT, 'package.json'), 'utf8')).version
+  } catch {
+    return null
+  }
+}
+
+/**
+ * 0.15 起对外提供的服务：让别的插件也能发提醒、发日报、读统计，而不用自己起宿主。
+ * 全部方法是 fire-and-forget 语义（返回 Promise，失败只在返回值里体现），不会抛给调用方。
+ */
+export function serviceOf(ctx, getSettings) {
+  return {
+    name: 'dsh-reminder-notify',
+    version: packageVersion(),
+    /** 发一张提醒卡。kind: done | decide | raw；options 同 notify_user 的参数。 */
+    notify: (kind, options = {}) => notify(nodeKind(kind), options || {}, getSettings()),
+    /** 立刻发一条日报（force: true 时忽略「今天已经发过」和「日报未开启」）。 */
+    digest: (options = {}) => runDigest(ctx, getSettings, { force: (options || {}).force === true }),
+    /** 提醒历史统计（不弹卡、不写文件）。 */
+    stats: () => historyStats(readHistory(getSettings())),
+    /** 当前生效的配置快照（只读副本）。 */
+    config: () => ({ ...getSettings() }),
+  }
+}
+
+function nodeKind(kind) {
+  return kind === 'decide' || kind === 'raw' ? kind : 'done'
+}
+
 export function apply(ctx, config) {
+  const getSettings = () => settingsOf(config)
+  if (typeof ctx.provide === 'function') {
+    // 服务在 apply 里一次性注册；ctx.provide 自己挂在本 fiber 上，插件卸载时会自动回收。
+    ctx.provide(SERVICE_NAME, serviceOf(ctx, getSettings))
+  } else {
+    ctx.logger?.warn?.('dsh-reminder-notify: ctx.provide is unavailable, the reminder service was not provided')
+  }
   registerAudioRoute(ctx, () => settingsOf(config))
   registerConfigRoute(ctx, () => settingsOf(config))
   registerPreviewRoute(ctx, () => settingsOf(config))

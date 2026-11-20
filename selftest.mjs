@@ -4,8 +4,14 @@ import { fileURLToPath } from 'node:url'
 import { apply, checkBalance, listAudioFiles, parseThresholds, previewAudio } from './index.js'
 
 let captured
+let provided
 function makeCtx(sink) {
   return {
+    provide(name, value) {
+      provided = provided || {}
+      provided[name] = value
+      return () => {}
+    },
     get(name) {
       if (name === 'tools') {
         return {
@@ -32,6 +38,15 @@ const historyFile = path.join(os.tmpdir(), 'drn-selftest-history.json')
 try { fs.unlinkSync(historyFile) } catch {}
 apply(ctx, { seconds: 4, position: 'br', sound: true, cooldownMs: 1500, historyFile })
 if (!captured) throw new Error('tool was not registered')
+const service = provided && provided.reminder
+if (!service) throw new Error('reminder service was not provided')
+for (const key of ['notify', 'digest', 'stats', 'config']) {
+  if (typeof service[key] !== 'function') throw new Error('service.' + key + ' missing')
+}
+console.log('service ok:', service.name, service.version, '| methods:', Object.keys(service).join(','))
+const snapshot = service.config()
+if (typeof snapshot.seconds === 'undefined') throw new Error('service.config() did not return settings')
+console.log('service stats ->', JSON.stringify(service.stats()))
 console.log('registered:', captured.name, '| params:', Object.keys(captured.parameters.properties).join(','))
 
 const out = await captured.execute({ kind: 'done', message: '插件自检：notify_user 已经能弹窗了。' })

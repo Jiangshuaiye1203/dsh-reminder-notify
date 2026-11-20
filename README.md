@@ -85,3 +85,18 @@ dsh plugin --profile desktop add link:<本目录绝对路径>
 - 仅 Windows（`os: ["win32"]`）：卡片宿主是 WinForms。
 - 每次弹卡片要起一个 PowerShell 进程，`Add-Type` 编译约 0.6 s 才出现（有轻微延迟，播放与动画照旧）。
 - 卡片随 DSH 宿主进程存活；DSH 关掉时正在显示的卡片也会一起消失。
+
+## 给别的插件用（0.15 起）
+
+插件把整套提醒能力挂在宿主的一个服务上，别的插件不用自己起 PowerShell、也不用重复写排队与免打扰逻辑：
+
+```js
+const reminder = ctx.get('reminder')          // 服务名固定为 reminder
+await reminder.notify('decide', { message: '有个改动等你点头', seconds: 30 })
+await reminder.digest({ force: true })        // 忽略「今天已发过」，立刻发一条日报
+reminder.stats()                              // { total, today, byKind, byAction, last7 }
+reminder.config()                             // 当前生效配置的只读副本
+```
+
+`notify()` 的 `kind` 与 `notify_user` 一致（`done` / `decide` / `raw`），其余参数同工具参数；调用同样受冷却、排队、合并、免打扰、历史记录约束。
+

@@ -10,3 +10,4 @@ Cards are drawn by the bundled `host/ReminderHost.ps1` with the built-in PowerSh
 - **Want to see it now**: press one of the three "try it" buttons; a sample card closes itself after 20 seconds.
 - **Want it on your phone**: open push under "Digest & push", pick the format, paste your own webhook URL (WeCom bot or Server Chan), then press "Send one now".
 - **Everything else**: folded into "How it works (expand to read)" inside the settings panel below, one topic at a time.
+- **For other plugins**: this plugin exposes a `reminder` service (`notify` / `digest` / `stats` / `config`); see the README.
