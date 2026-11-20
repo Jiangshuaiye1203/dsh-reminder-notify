@@ -42,6 +42,22 @@ Baseline rules (0.10.1):
 - no alert for **30 minutes after a top-up**, and an alert needs **two consecutive readings** below the threshold, which filters out top-up reversals and similar jitter;
 - when the balance cannot be read (signed out, service error) the last snapshot is kept and marked stale instead of being treated as ¥0.
 
+## What was verified on a real machine (0.11.1 note)
+
+Verified on Windows 11 · PowerShell 5.1 · 3440×1440 at 125%:
+
+- **Queueing**: a second call while a card is open returns `queued:true, position_in_queue:1`, and it moves up once the first card closes.
+- **Merging**: the same kind inside the merge window returns `merged:true, count:2` with one joined body.
+- **Card buttons**: clicking "Got it" closes with `action:"ok"` and shows up in history (`elapsedMs:22413` on the real click).
+- **Snooze**: when a host returns `{"action":"snooze","snooze":N}` the first record is `snoozed:false`, then the card returns N minutes later and records `snoozed:true`. Checked with a stub host that answers `snooze` immediately (`scriptPath` pointed at it) — same code path a real click takes.
+- **Quiet hours**: `raw` inside the window returns `quiet:true`; `skip` returns `skipped:"quiet"` and shows nothing; `hold` re-fires exactly when the window ends (22:30–22:38 window, card appeared 22:38:00, history `quiet:true`); `decide` stays `quiet:false` and is never swallowed.
+- **History**: `/dsh-reminder-notify/history` and the panel counters stay in sync, and `byAction` separates `timeout / ok / snooze / dismiss / quiet-skip`.
+
+Not verifiable from code:
+
+- Synthetic clicks cannot reach the card: it is a `WS_EX_NOACTIVATE` window, so `mouse_event` and `PostMessage(WM_LBUTTONDOWN)` never arrive (no `MouseDown` at all). Buttons need a human click; the hit-test maths is covered by unit tests.
+- Whether speech is actually audible: logs prove `-Speak` reaches the host and `Microsoft Huihui Desktop (zh-CN)` is installed, but nothing can confirm the speaker played it.
+
 ## Known limits
 
 - Windows only (`os: ["win32"]`): the card host is WinForms.

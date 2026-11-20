@@ -44,6 +44,22 @@
 - 刚充值/刚抬升基线的 **30 分钟内不播报**，并且要**连续两次查到低于阈值**才响，避免充值入账被冲正之类的抖动误报；
 - 查不到余额（未登录、接口失败）时保留上次结果，只显示过期提示，不会当成 0 元去喊。
 
+## 各项功能的验证范围（0.11.1 记录）
+
+真机（Windows 11 · PowerShell 5.1 · 屏幕 3440×1440 DPI 125%）跑过的：
+
+- **排队**：第一张卡没关时再调 `notify_user`，返回 `queued:true`、`position_in_queue:1`，卡片关掉后第二张自动顶上。
+- **合并**：同档位在合并窗口内再次触发，返回 `merged:true`、`count:2`，正文并成一条。
+- **卡片按钮**：点「知道了」会以 `action:"ok"` 关闭并记进历史（真机点过一次，`elapsedMs:22413`）。
+- **稍后提醒**：宿主回 `{"action":"snooze","snooze":N}` 之后，历史里第一次记 `snoozed:false`，N 分钟后再弹一次并记 `snoozed:true`。这条是用一个“立即返回 snooze”的假宿主脚本（`scriptPath` 指过去）验的，链路与真机点按钮走的是同一段代码。
+- **免打扰**：窗口内 `raw` 返回 `quiet:true`；`skip` 返回 `skipped:"quiet"` 且不弹；`hold` 会在窗口结束的那一刻补弹（实测 22:30–22:38 的窗口，卡片在 22:38:00 出现，历史 `quiet:true`）；同一时段 `decide` 档 `quiet:false`，照常弹。
+- **历史与统计**：`/dsh-reminder-notify/history` 与面板的「共 N 条 · 今天 M 条」随每次关闭同步，`byAction` 能分开统计 `timeout / ok / snooze / dismiss / quiet-skip`。
+
+没能自动验证的：
+
+- **合成点击点不到卡片**：卡片是 `WS_EX_NOACTIVATE` 的无焦点窗口，`mouse_event`、`PostMessage(WM_LBUTTONDOWN)` 都收不到（连 `MouseDown` 日志都没有），所以按钮只能由人手点。宿主自己的命中判定逻辑有单测覆盖。
+- **语音是否真的出声**：日志能确认 `-Speak` 传到了宿主、系统里也装了 `Microsoft Huihui Desktop (zh-CN)`，但没法从代码里确认扬声器里确实念了。
+
 ## 已知限制
 
 - 仅 Windows（`os: ["win32"]`）：卡片宿主是 WinForms。
