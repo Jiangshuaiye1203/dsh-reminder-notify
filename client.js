@@ -340,6 +340,23 @@ window.__ModuleLoader__.load({
       historyActionOk: '知道了',
       historyActionSnooze: '稍后提醒',
       historyActionQuietSkip: '免打扰跳过',
+      groupHelp: '使用说明（点开才看）',
+      helpIntro: '下面每条点开才看，平时不占地方。',
+      helpUse: '什么时候会弹',
+      helpUseText: '模型在任务收尾时发「完成」，在要你拍板前发「需要你来决定」，也可以直接用「普通」发任意一句话。你不需要手动触发。',
+      helpCard: '卡片上能做什么',
+      helpCardText: '「知道了」立刻关掉；「稍后提醒」过 N 分钟再弹一次（N 在设置里改）；什么都不点就按停留秒数自动关闭。卡片不抢焦点，鼠标点一下也能关。',
+      helpQueue: '同时来好几条',
+      helpQueueText: '同一时间只显示一张，其余排队（上限在设置里改）。同档位在合并窗口内再次触发会并进排队那条，不重复弹。',
+      helpQuiet: '免打扰时段',
+      helpQuietText: '时段内不再弹「完成」和普通提醒：「需要你来决定」照常弹。处理方式可选「留到结束后补弹」或「直接跳过」。全屏时会自动换成窄卡片，少挡内容。',
+      helpDigest: '日报与手机推送',
+      helpDigestText: '打开日报后每天到点发一条，内容是当天条数与处理方式统计，可选带上余额。推送需要你自己的 webhook：企业微信机器人地址（格式选「企业微信机器人」）或 Server 酱的 sctapi.ftqq.com 地址（格式选「Server 酱」）。发失败时这里会写明原因。',
+      helpBalance: '余额提醒',
+      helpBalanceText: '用本机已登录的 DSH 账号查 DeepSeek 余额，低于阈值的百分比就提醒；基线是「最近一次充值后的余额」，赠送金不计入，刚充值后的 30 分钟内不播报。',
+      helpHost: '宿主与排查',
+      helpHostText: '卡片由包内 host/ReminderHost.ps1 用系统 PowerShell 绘制，没有 exe，所以不触发 SmartScreen。没有卡片时先按「试试看」三个按钮；还不行就检查宿主设置里的脚本路径，或在设置面板最下方看历史记录里有没有对应条目。',
+      helpTip: '完整说明在包内 docs/detail.zh.md；改完记得点最下面的「保存」。',
     })
 
     Object.assign(en, {
@@ -432,7 +449,24 @@ window.__ModuleLoader__.load({
       historyActionDismiss: 'clicked',
       historyActionOk: 'got it',
       historyActionSnooze: 'snoozed',
-      historyActionQuietSkip: 'quiet-skip',
+      historyActionQuietSkip: 'skipped (quiet hours)',
+      groupHelp: 'How it works (expand to read)',
+      helpIntro: 'Each topic stays folded until you open it.',
+      helpUse: 'When a card appears',
+      helpUseText: 'The model fires "done" when a task finishes, "decide" before it needs your call, and can also send a plain "raw" message. You never trigger it by hand.',
+      helpCard: 'What the card can do',
+      helpCardText: '"Got it" closes it right away; "Snooze" brings it back after N minutes (configurable); doing nothing lets it auto-close after the stay time. The card never steals focus, and a click on it also dismisses it.',
+      helpQueue: 'Several at once',
+      helpQueueText: 'Only one card shows at a time, the rest queue up (limit is configurable). A repeat from the same kind inside the merge window joins the queued card instead of popping twice.',
+      helpQuiet: 'Quiet hours',
+      helpQuietText: 'Inside the window, "done" and raw reminders stay silent while "decide" still shows. Choose either "hold until it ends" or "skip it". On a full-screen app the card switches to a compact layout.',
+      helpDigest: 'Daily digest & phone push',
+      helpDigestText: 'With the digest on, one summary is sent each day: counts and how you handled them, optionally with the balance. Pushing needs your own webhook: a WeCom bot URL (format "WeCom bot") or a Server Chan sctapi.ftqq.com URL (format "Server Chan"). Failures are reported right here.',
+      helpBalance: 'Balance alerts',
+      helpBalanceText: 'Reads the DeepSeek balance through the signed-in DSH account and warns when it drops below a percentage of the baseline. The baseline is the balance right after your last top-up, bonus credit is excluded, and nothing fires within 30 minutes of a top-up.',
+      helpHost: 'Host & troubleshooting',
+      helpHostText: 'Cards are drawn by host/ReminderHost.ps1 with the built-in PowerShell, so there is no exe and no SmartScreen prompt. If nothing shows, press one of the three "try it" buttons first; then check the script path under host settings, or look for the entry in the history list at the bottom of this panel.',
+      helpTip: 'The full document ships in docs/detail.en.md. Remember to press "Save" at the bottom.',
     })
 
     const CSS = `
@@ -468,6 +502,8 @@ window.__ModuleLoader__.load({
 .drn-fold-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; box-sizing: border-box; font: inherit; font-size: 12px; font-weight: 600; color: var(--dsw-alias-label-secondary); background: transparent; border: 0; padding: 10px 14px; cursor: pointer; text-align: left; }
 .drn-fold-body { display: flex; flex-direction: column; gap: 12px; padding: 0 14px 14px; }
 .drn-fold-body > .drn-group { border: 0; padding: 0; background: transparent; }
+.drn-help { display: flex; flex-direction: column; gap: 8px; }
+.drn-help-body { font-size: 12px; line-height: 1.6; color: var(--dsw-alias-label-secondary); white-space: pre-wrap; }
 .drn-chevron { font-size: 11px; }
 `
 
@@ -598,6 +634,18 @@ window.__ModuleLoader__.load({
       { id: 'audio', label: 'groupAudio', groups: ['audio'] },
       { id: 'queue', label: 'groupQueue', groups: ['queue'] },
       { id: 'misc', label: 'groupAdvanced', groups: ['digest', 'history', 'balance', 'host'] },
+      { id: 'help', label: 'groupHelp', groups: [] },
+    ]
+
+    // 0.14：说明收进面板里，按条目折叠。
+    const HELP_ITEMS = [
+      { id: 'use', title: 'helpUse', body: 'helpUseText' },
+      { id: 'card', title: 'helpCard', body: 'helpCardText' },
+      { id: 'queue', title: 'helpQueue', body: 'helpQueueText' },
+      { id: 'quiet', title: 'helpQuiet', body: 'helpQuietText' },
+      { id: 'digest', title: 'helpDigest', body: 'helpDigestText' },
+      { id: 'balance', title: 'helpBalance', body: 'helpBalanceText' },
+      { id: 'host', title: 'helpHost', body: 'helpHostText' },
     ]
 
     function sameValue(a, b) {
@@ -627,6 +675,7 @@ window.__ModuleLoader__.load({
       // 0.13：折叠块的展开状态（默认全收起）与「试试看」的忙碌标记。
       const [openBlocks, setOpenBlocks] = React.useState({})
       const [tryBusy, setTryBusy] = React.useState(null)
+      const [helpOpen, setHelpOpen] = React.useState({})
 
       React.useEffect(() => {
         if (typeof fetch !== 'function') {
@@ -1318,9 +1367,40 @@ window.__ModuleLoader__.load({
 
       const advanced = ADV_BLOCKS.map((block) => {
         const open = openBlocks[block.id] === true
-        const children = block.groups.map((group) =>
-          group === 'digest' ? groupCard('digest', ADV_DIGEST, false) : groupCard(group),
-        )
+        const children = block.id === 'help'
+          ? [
+              h(
+                'div',
+                { className: 'drn-help', key: 'help-list' },
+                h('div', { className: 'drn-head-intro' }, label('helpIntro')),
+                HELP_ITEMS.map((item) => {
+                  const opened = helpOpen[item.id] === true
+                  return h(
+                    'div',
+                    { className: 'drn-fold', key: 'help-' + item.id },
+                    h(
+                      'button',
+                      {
+                        type: 'button',
+                        className: 'drn-fold-head',
+                        onClick: () => setHelpOpen(Object.assign({}, helpOpen, { [item.id]: !opened })),
+                      },
+                      h('span', null, label(item.title)),
+                      h('span', { className: 'drn-chevron' }, opened ? '▾ ' + label('foldCollapse') : '▸ ' + label('foldExpand')),
+                    ),
+                    h(
+                      'div',
+                      { className: 'drn-fold-body', style: opened ? undefined : { display: 'none' } },
+                      h('div', { className: 'drn-help-body' }, label(item.body)),
+                    ),
+                  )
+                }),
+                h('div', { className: 'drn-head-intro' }, label('helpTip')),
+              ),
+            ]
+          : block.groups.map((group) =>
+              group === 'digest' ? groupCard('digest', ADV_DIGEST, false) : groupCard(group),
+            )
         return h(
           'div',
           { className: 'drn-fold', key: 'fold-' + block.id },

@@ -21,7 +21,12 @@ check('parseClock 乱写 -> null', parseClock('晚上十点'), null)
 
 // —— 免打扰时段（默认 22:00 → 08:00，跨零点） ——
 const quiet = { quietEnabled: true, quietStart: '22:00', quietEnd: '08:00' }
-const at = (h, m) => new Date(2026, 10, 20, h, m, 0, 0)
+// 用「今天」构造时刻：写死日期会让这套断言在跨过零点后失败。
+const at = (h, m) => {
+  const d = new Date()
+  d.setHours(h, m, 0, 0)
+  return d
+}
 check('23:30 在免打扰内', inQuietHours(quiet, at(23, 30)), true)
 check('07:00 在免打扰内', inQuietHours(quiet, at(7, 0)), true)
 check('12:00 不在免打扰内', inQuietHours(quiet, at(12, 0)), false)
@@ -35,9 +40,11 @@ check('10:00 在白天时段内', inQuietHours(day, at(10, 0)), true)
 check('20:00 不在白天时段内', inQuietHours(day, at(20, 0)), false)
 
 // 08:00 收尾时间：23:30 时应该指向「明天 08:00」
-const endAt = quietEndAt(quiet, at(23, 30))
+const ref2330 = at(23, 30)
+const endAt = quietEndAt(quiet, ref2330)
 const endDate = new Date(endAt)
-check('quietEndAt 跨到次日 08:00', [endDate.getDate(), endDate.getHours(), endDate.getMinutes()], [21, 8, 0])
+const tomorrow = new Date(ref2330.getTime() + 86400000).getDate()
+check('quietEndAt 跨到次日 08:00', [endDate.getDate(), endDate.getHours(), endDate.getMinutes()], [tomorrow, 8, 0])
 
 // —— 历史统计 ——
 const now = Date.now()
