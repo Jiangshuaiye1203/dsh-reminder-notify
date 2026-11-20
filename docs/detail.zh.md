@@ -31,6 +31,8 @@
   `json`（`{"title","message","kind","time"}`）、`text`（`标题\n正文` 纯文本）。
   `pushDecide` 控制「需要你来决定」是否推送，`pushDigest` 控制日报是否推送。
   推送是 fire-and-forget：超时 8 秒、失败只记在返回值里，不影响卡片，也不阻塞 `notify_user`。
+  0.12.1 起会解析对方返回的 `errcode` / `code`：企业微信「webhook 地址不对」这类 HTTP 200 的失败也算失败，
+  面板上「现在发一条」会直接写出发送结果或失败原因。
 
 ## 提醒的行为（0.11 起）
 

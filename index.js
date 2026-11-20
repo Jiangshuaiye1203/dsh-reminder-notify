@@ -1387,6 +1387,19 @@ export async function pushOut(settings, title, message, extra = {}) {
       signal: typeof AbortSignal?.timeout === 'function' ? AbortSignal.timeout(8000) : undefined,
     })
     const text = await response.text().catch(() => '')
+    let parsed = null
+    try {
+      parsed = text === '' ? null : JSON.parse(text)
+    } catch {
+      parsed = null
+    }
+    // 企业微信/Server 酱都是 HTTP 200 + 报文里的错误码：
+    // 只看 response.ok 会把「webhook 地址不对」当成发送成功。
+    const code = parsed && typeof parsed === 'object' ? parsed.errcode ?? parsed.code : undefined
+    if (code !== undefined && code !== null && Number(code) !== 0) {
+      const reason = String(parsed.errmsg ?? parsed.message ?? code)
+      return { ok: false, status: response.status, error: 'webhook-rejected', reason, body: text.slice(0, 200) }
+    }
     return { ok: response.ok, status: response.status, body: text.slice(0, 200) }
   } catch (error) {
     return { ok: false, error: String(error?.message ?? error) }

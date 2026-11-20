@@ -900,11 +900,38 @@ window.__ModuleLoader__.load({
       }
 
       function sendDigest() {
-        digestFetch({
-          method: 'POST',
-          headers: { 'content-type': 'application/json', accept: 'application/json' },
-          body: JSON.stringify({ mode: 'send' }),
-        })
+        const label = typeof t === 'function' ? t : (key) => key
+        setMessage(null)
+        setDigestBusy(true)
+        Promise.resolve()
+          .then(() =>
+            fetch(DIGEST_ROUTE, {
+              method: 'POST',
+              headers: { 'content-type': 'application/json', accept: 'application/json' },
+              body: JSON.stringify({ mode: 'send' }),
+            }),
+          )
+          .then((response) => (response && typeof response.json === 'function' ? response.json() : Promise.reject(new Error('HTTP ' + (response ? response.status : '?')))))
+          .then((data) => {
+            setDigestBusy(false)
+            if (!data || data.ok === false) throw new Error((data && data.error) || 'send rejected')
+            setDigest(data)
+            const push = data.push
+            if (!push) {
+              setMessage({ ok: true, text: label('digestSentNoPush') })
+              return
+            }
+            if (push.ok) {
+              setMessage({ ok: true, text: label('digestPushOkPrefix') + String(push.status === undefined ? '200' : push.status) + ')' })
+              return
+            }
+            const reason = push.reason || push.error || push.body || String(push.status || '')
+            setMessage({ ok: false, text: label('digestPushFailedPrefix') + String(reason) })
+          })
+          .catch((error) => {
+            setDigestBusy(false)
+            setMessage({ ok: false, text: label('digestSendFailedPrefix') + String((error && error.message) || error) })
+          })
       }
 
       function digestText() {

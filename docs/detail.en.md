@@ -30,6 +30,8 @@ Changes apply on "Save" — no restart needed.
 - **Phone push**: `pushEnabled` + `pushUrl` + `pushFormat` — `wecom` (WeCom bot), `serverchan` (ServerChan),
   `json` (generic webhook), `text` (plain text). `pushDecide` and `pushDigest` decide whether decisions and the
   digest are pushed. Delivery is fire-and-forget: 8s timeout, failures only show up in the return value.
+  Since 0.12.1 the `errcode` / `code` in the response is parsed, so a WeCom "invalid webhook url" (HTTP 200)
+  counts as a failure, and "Send one now" reports the result or the reason in the panel.
 
 ## Card behaviour (0.11+)
 
