@@ -4,17 +4,20 @@ DSH 的「插件市场 → 发现」页读的是**索引 URL**：一份 JSON（�
 索引本身不托管代码，只给出版本从哪儿装（`git` 仓库 + 固定提交，或 npm 包名）。
 本目录的 `index.json` 由 `scripts/build-index.mjs` 生成，**不要手改**。
 
-## 已发布状态（2026-11-18）
+## 已发布状态（2026-11-20 更新）
 
 | 项目 | 值 |
 | --- | --- |
 | 公开仓库 | https://github.com/Jiangshuaiye1203/dsh-reminder-notify |
 | 索引地址（他人添加这个） | `https://jiangshuaiye1203.github.io/dsh-reminder-notify/publish/index.json` |
 | 站点首页 | https://jiangshuaiye1203.github.io/dsh-reminder-notify/ |
-| 当前版本 | 0.2.0，装源固定提交 `923cfe625fc737e1b39ba3cfc382061100a67e02` |
+| npm 包 | https://www.npmjs.com/package/dsh-reminder-notify |
+| 当前版本 | **0.10.2**，装源为 **npm**（`dsh-reminder-notify@0.10.2`），不再是 git 固定提交 |
 | Pages | Deploy from a branch，`main` / `(root)` |
 
-发新版只需要：改代码 → 提交 → push → `node scripts/build-index.mjs --publish` → push。
+发新版（npm 源）：改代码 → 升 `package.json` 版本 → `scripts\publish-npm.cmd` 发布到 npm →
+`node scripts/build-index.mjs --npm --publish` → `git push`。
+索引必须指向**已经发到 npm 的版本**，否则别人装下来的还是旧包（详见第 6 节）。
 
 ## 0. 结构
 
