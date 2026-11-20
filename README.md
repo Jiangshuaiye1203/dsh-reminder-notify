@@ -33,6 +33,15 @@ dsh plugin --profile desktop add link:<本目录绝对路径>
 - 每条结果写进 `~/.dsh/dsh-reminder-notify/history.json`（`historyEnabled` / `historyLimit`），
   插件页「历史与统计」里能看到总计 / 今日条数和最近记录，可以一键清空。
 
+0.12 起多了两件「离屏也能知道」的事：
+
+- **每日日报**（`digestEnabled` + `digestTime`，默认 09:00）：到点弹一张卡，写今天弹了几条、你点掉了几条，
+  末尾附当前余额；一天只发一条，关机错过不补。
+- **条数预警**（`digestAlertCount`，默认 0 = 关）：当天提醒条数超过阈值时，额外弹一张「提醒有点多」。
+- **手机推送**（`pushEnabled` + `pushUrl` + `pushFormat`）：`wecom` 企业微信机器人 / `serverchan` Server 酱 /
+  `json` 通用 webhook / `text` 纯文本；`pushDecide` 管「需要你来决定」要不要推，`pushDigest` 管日报要不要推。
+  推送失败不影响桌面卡片，也不会拖慢 `notify_user`。
+
 ## 资产
 
 | 东西 | 位置 |
@@ -61,6 +70,8 @@ dsh plugin --profile desktop add link:<本目录绝对路径>
 `mergeWindowMs`（3000）、`quietEnabled`、`quietStart`（`22:00`）、`quietEnd`（`08:00`）、
 `quietMode`（`hold`/`skip`）、`compactOnFullscreen`、`historyEnabled`、`historyLimit`（200）、
 `historyFile`（留空 = `~/.dsh/dsh-reminder-notify/history.json`）。
+
+0.12 新增：`digestEnabled`（false）、`digestTime`（09:00）、`digestTitle`（今日提醒日报）、`digestIncludeBalance`（true）、`digestAlertCount`（0）、`pushEnabled`（false）、`pushUrl`、`pushFormat`（wecom）、`pushDecide`（true）、`pushDigest`（true）。
 
 ## 已知限制
 

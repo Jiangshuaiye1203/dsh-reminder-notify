@@ -72,3 +72,25 @@
         historyLimit: 200
         # 历史文件路径；留空 = ~/.dsh/dsh-reminder-notify/history.json
         historyFile: ''
+        # 每天在固定时间弹一条「今日提醒日报」
+        digestEnabled: false
+        # 日报时间，HH:MM（过点后的第一次检查才会发，一天只发一条）
+        digestTime: '09:00'
+        digestTitle: 今日提醒日报
+        # 日报里带上当前 DeepSeek 余额
+        digestIncludeBalance: true
+        # 当天提醒超过这个条数就额外弹一张预警卡（0 = 关）
+        digestAlertCount: 0
+        # 内部状态：上次发日报 / 弹预警的日期
+        digestLastDate: ''
+        digestAlertDate: ''
+        # 把提醒同时推到手机（企业微信机器人 / Server 酱 / 自定义 webhook）
+        pushEnabled: false
+        # 推送地址
+        pushUrl: ''
+        # wecom = 企业微信机器人；serverchan = Server 酱；json = 通用 JSON；text = 纯文本
+        pushFormat: wecom
+        # 「需要你来决定」档位也推到手机
+        pushDecide: true
+        # 日报同时推到手机
+        pushDigest: true

@@ -1,6 +1,6 @@
 // 纯逻辑自检：不弹窗口、不碰文件，只验证免打扰时段计算和历史统计。
 // 跑法：node tests/selftest-logic.mjs
-import { historyStats, inQuietHours, parseClock, quietEndAt } from '../index.js'
+import { digestDue, digestMessage, historyStats, inQuietHours, parseClock, pushPayload, quietEndAt, todayKey } from '../index.js'
 
 let failed = 0
 function check(label, actual, expected) {
@@ -54,6 +54,39 @@ check('stats.byAction.ok', stats.byAction.ok, 2)
 check('stats.today', stats.today, 3)
 check('stats.last7 长度', stats.last7.length, 7)
 check('stats.last7 末位是今天', stats.last7[stats.last7.length - 1].count, 3)
+
+// —— 日报（0.12） ——
+const base = { digestEnabled: true, digestTime: '09:00', digestLastDate: '' }
+check('08:59 还没到点', digestDue(base, at(8, 59)), false)
+check('09:00 到点发', digestDue(base, at(9, 0)), true)
+check('14:00 过点了也发（补发当天那条）', digestDue(base, at(14, 0)), true)
+check('今天已经发过就不发', digestDue({ ...base, digestLastDate: todayKey(at(9, 0)) }, at(14, 0)), false)
+check('关掉开关就不发', digestDue({ ...base, digestEnabled: false }, at(14, 0)), false)
+check('时间写错就不发', digestDue({ ...base, digestTime: '25:00' }, at(14, 0)), false)
+
+const digestEntries = [
+  { at: at(10, 0).getTime(), kind: 'done', action: 'ok' },
+  { at: at(11, 0).getTime(), kind: 'decide', action: 'snooze' },
+  { at: at(12, 0).getTime(), kind: 'raw', action: 'timeout' },
+  { at: at(12, 30).getTime(), kind: 'raw', action: 'quiet-skip' },
+  { at: at(12, 40).getTime() - 86400000, kind: 'done', action: 'ok' },
+]
+const text = digestMessage({ balanceBaseline: 100 }, digestEntries, { balance: 42.5 })
+check('日报首行条数', text.split('\n')[0].includes('今天共 4 条提醒'), true)
+check('日报第二行处理方式', text.split('\n')[1].includes('点知道了 1'), true)
+check('日报带余额与基线', text.split('\n')[2], 'DeepSeek 余额 ¥42.50（基线 ¥100.00）')
+check('空历史也有一行', digestMessage({}, [], null), '今天还没有弹过提醒。')
+check('没余额就不加那行', digestMessage({}, digestEntries, null).split('\n').length, 2)
+
+// —— 推送报文（0.12） ——
+const wecom = JSON.parse(pushPayload({ pushFormat: 'wecom' }, 'T', 'M').body)
+check('wecom 报文', [wecom.msgtype, wecom.text.content], ['text', 'T\nM'])
+const sc = JSON.parse(pushPayload({ pushFormat: 'serverchan' }, 'T', 'M').body)
+check('serverchan 报文', [sc.title, sc.desp], ['T', 'M'])
+check('text 报文', pushPayload({ pushFormat: 'text' }, 'T', 'M').body, 'T\nM')
+check('text 的 content-type', pushPayload({ pushFormat: 'text' }, 'T', 'M').headers['content-type'], 'text/plain; charset=utf-8')
+const generic = JSON.parse(pushPayload({ pushFormat: 'json' }, 'T', 'M', { kind: 'decide' }).body)
+check('json 报文', [generic.title, generic.message, generic.kind], ['T', 'M', 'decide'])
 
 if (failed > 0) {
   console.log(`\n${failed} 项失败`)

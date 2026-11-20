@@ -6,18 +6,30 @@ The card host is the bundled `host/ReminderHost.ps1`, drawn with the system Powe
 
 ## Settings
 
-Open "Desktop reminder" in the Plugins page; the panel sits right under the description and has seven groups:
+Open "Desktop reminder" in the Plugins page; the panel sits right under the description and has eight groups:
 
 - **Basics**: duration, position, sound on/off
 - **Sounds**: audio directory ("Browse…" picks a directory), the three per-kind file names (wav / mp3). Once a directory is picked the dropdown lists the audio files in it.
 - **Look**: background image, title icon, accent colours, title/message templates (`{title}` `{message}` `{kind}` `{time}`), plus per-kind overrides for background, icon and templates
 - **Queue & quiet hours**: spoken alerts, card buttons, snooze minutes, queue on/off and limit, merge window, quiet hours and their behaviour, compact card on fullscreen
 - **History & stats**: record or not, entries kept, plus the total/today counts and the last 8 entries with "Refresh" and "Clear"
+- **Digest & push**: daily digest (switch, time, title, include balance, alert threshold) and phone push (switch, URL, format, whether decisions and the digest are pushed); the panel previews today's digest text and can send one right now
 - **Host**: script or exe host, script path, PowerShell path
 
 Changes apply on "Save" — no restart needed.
 
 - **DeepSeek balance**: enable, thresholds (20/10/5 % by default), check interval, spoken alerts; the panel can check now and set the current balance as the baseline
+
+## Digest and phone push (0.12+)
+
+- **Daily digest**: with `digestEnabled` on, one card goes out after `digestTime` (default 09:00): how many reminders
+  fired today, per kind, how they were handled, plus the current balance if `digestIncludeBalance` is on.
+  `digestLastDate` keeps it to one per day; a missed day is not replayed.
+- **Volume alert**: with `digestAlertCount` above 0, one extra "a lot of reminders" card fires the first time today
+  passes the threshold (`digestAlertDate` keeps it to once a day).
+- **Phone push**: `pushEnabled` + `pushUrl` + `pushFormat` — `wecom` (WeCom bot), `serverchan` (ServerChan),
+  `json` (generic webhook), `text` (plain text). `pushDecide` and `pushDigest` decide whether decisions and the
+  digest are pushed. Delivery is fire-and-forget: 8s timeout, failures only show up in the return value.
 
 ## Card behaviour (0.11+)
 

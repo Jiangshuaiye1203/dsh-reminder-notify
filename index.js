@@ -89,6 +89,18 @@ export const Config = z === null ? undefined : z.object({
   historyEnabled: z.boolean().default(true).description('记录提醒历史（本地 JSON），供插件页看统计').volatile(),
   historyLimit: z.number().min(20).max(2000).step(10).default(200).description('历史最多保留多少条（20–2000）').volatile(),
   historyFile: z.string().default('').description('历史文件路径，留空 = <用户目录>\\.dsh\\dsh-reminder-notify\\history.json').volatile(),
+  digestEnabled: z.boolean().default(false).description('每天在固定时间弹一条「今日提醒日报」').volatile(),
+  digestTime: z.string().default('09:00').description('日报时间，HH:MM（每天只在过点后的第一次检查里发一条）').volatile(),
+  digestTitle: z.string().default('今日提醒日报').description('日报卡片标题').volatile(),
+  digestIncludeBalance: z.boolean().default(true).description('日报里带上当前 DeepSeek 余额').volatile(),
+  digestAlertCount: z.number().min(0).max(500).step(5).default(0).description('当天提醒超过这个条数时额外弹一张预警卡（0 = 关）').volatile(),
+  digestLastDate: z.string().default('').description('内部状态：上次发日报的日期').volatile(),
+  digestAlertDate: z.string().default('').description('内部状态：上次弹条数预警的日期').volatile(),
+  pushEnabled: z.boolean().default(false).description('把提醒同时推到手机（企业微信机器人 / Server酱 / 自定义 webhook）').volatile(),
+  pushUrl: z.string().default('').description('推送地址，例如 https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=…').volatile(),
+  pushFormat: z.union(['wecom', 'serverchan', 'json', 'text']).default('wecom').description('推送格式：wecom 企业微信机器人、serverchan Server酱、json 通用 JSON、text 纯文本').volatile(),
+  pushDecide: z.boolean().default(true).description('「需要你来决定」档位也推到手机').volatile(),
+  pushDigest: z.boolean().default(true).description('日报同时推到手机').volatile(),
   dryRun: z.boolean().default(false).description('调试用：只试算参数、不真的弹窗（自检脚本会打开它）').volatile(),
 })
 
@@ -217,6 +229,18 @@ function settingsOf(config) {
     historyEnabled: c.historyEnabled !== false,
     historyLimit: Math.round(clamp(num(c.historyLimit, 200), 20, 2000)),
     historyFile: str(c.historyFile, ''),
+    digestEnabled: c.digestEnabled === true,
+    digestTime: str(c.digestTime, '09:00'),
+    digestTitle: str(c.digestTitle, '今日提醒日报'),
+    digestIncludeBalance: c.digestIncludeBalance !== false,
+    digestAlertCount: Math.round(clamp(num(c.digestAlertCount, 0), 0, 500)),
+    digestLastDate: str(c.digestLastDate, ''),
+    digestAlertDate: str(c.digestAlertDate, ''),
+    pushEnabled: c.pushEnabled === true,
+    pushUrl: typeof c.pushUrl === 'string' ? c.pushUrl.trim() : '',
+    pushFormat: ['wecom', 'serverchan', 'json', 'text'].includes(c.pushFormat) ? c.pushFormat : 'wecom',
+    pushDecide: c.pushDecide !== false,
+    pushDigest: c.pushDigest !== false,
     dryRun: c.dryRun === true,
   }
 }
@@ -720,7 +744,7 @@ const parameters = {
   },
 }
 
-function toolDefinition(getSettings) {
+function toolDefinition(getSettings, ctx) {
   return {
     name: 'notify_user',
     description:
@@ -747,6 +771,10 @@ function toolDefinition(getSettings) {
       }
       const result = await notify(kind, args && typeof args === 'object' ? args : {}, settings)
       if (result.ok) lastFiredAt.set(kind, now)
+      // 手机推送是「顺带」而不是主路径：失败不影响本次工具调用，也不等它。
+      if (result.ok && kind === 'decide' && settings.pushEnabled && settings.pushDecide && settings.dryRun !== true) {
+        pushOut(settings, str(result.title, '需要你来决定'), str(result.message, ''), { kind }).catch(() => {})
+      }
       return JSON.stringify(result)
     },
   }
@@ -758,6 +786,7 @@ const CONFIG_ROUTE = '/dsh-reminder-notify/config'
 const PREVIEW_ROUTE = '/dsh-reminder-notify/preview'
 const BALANCE_ROUTE = '/dsh-reminder-notify/balance'
 const HISTORY_ROUTE = '/dsh-reminder-notify/history'
+const DIGEST_ROUTE = '/dsh-reminder-notify/digest'
 
 // 面板要「把音频目录里的文件列成下拉」，但 Client 侧没有任何读文件能力，
 // 所以由 Host 注册一条只读的 GET 路由，页面用同源 fetch 取这个 JSON。
@@ -1282,6 +1311,199 @@ export function historyStats(entries) {
   }
 }
 
+// ——— 日报与手机推送 ——————————————————————————————————————————————
+//
+// 手机推送没有可用的宿主服务（服务目录里没有 im / chat / notification），
+// 所以就按「用户自己提供一个 webhook」来做：企业微信群机器人、Server 酱、
+// 通用 JSON、纯文本四种格式，都是 POST 一个 URL，不需要账号体系。
+function dayKeyOf(ms) {
+  const d = new Date(ms)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+export function todayKey(now = new Date()) {
+  return dayKeyOf(now.getTime())
+}
+
+export function digestDue(settings, now = new Date()) {
+  if (settings.digestEnabled !== true) return false
+  const at = parseClock(settings.digestTime)
+  if (at === null) return false
+  if (settings.digestLastDate === todayKey(now)) return false
+  return now.getHours() * 60 + now.getMinutes() >= at
+}
+
+export function digestMessage(settings, entries, balance) {
+  const today = todayKey()
+  const rows = (Array.isArray(entries) ? entries : []).filter((e) => dayKeyOf(num(e?.at, 0)) === today)
+  const byKind = (k) => rows.filter((e) => e.kind === k).length
+  const byAction = (a) => rows.filter((e) => e.action === a).length
+  const lines = []
+  if (rows.length === 0) {
+    lines.push('今天还没有弹过提醒。')
+  } else {
+    lines.push(`今天共 ${rows.length} 条提醒：完成 ${byKind('done')}、需要你决定 ${byKind('decide')}、普通 ${byKind('raw')}。`)
+    const how = []
+    if (byAction('timeout') > 0) how.push(`自动关闭 ${byAction('timeout')}`)
+    if (byAction('ok') > 0) how.push(`点知道了 ${byAction('ok')}`)
+    if (byAction('snooze') > 0) how.push(`稍后提醒 ${byAction('snooze')}`)
+    if (byAction('dismiss') > 0) how.push(`点掉了 ${byAction('dismiss')}`)
+    if (byAction('quiet-skip') > 0) how.push(`免打扰跳过 ${byAction('quiet-skip')}`)
+    if (how.length > 0) lines.push(`处理方式：${how.join('、')}。`)
+  }
+  const value = num(balance?.balance, NaN)
+  if (Number.isFinite(value)) {
+    const base = num(settings.balanceBaseline, 0)
+    lines.push(base > 0 ? `DeepSeek 余额 ¥${value.toFixed(2)}（基线 ¥${base.toFixed(2)}）` : `DeepSeek 余额 ¥${value.toFixed(2)}`)
+  }
+  return lines.join('\n')
+}
+
+export function pushPayload(settings, title, message, extra = {}) {
+  const body = String(message ?? '')
+  const json = { 'content-type': 'application/json' }
+  if (settings.pushFormat === 'serverchan') {
+    return { headers: json, body: JSON.stringify({ title, desp: body }) }
+  }
+  if (settings.pushFormat === 'text') {
+    return { headers: { 'content-type': 'text/plain; charset=utf-8' }, body: `${title}\n${body}` }
+  }
+  if (settings.pushFormat === 'wecom') {
+    return { headers: json, body: JSON.stringify({ msgtype: 'text', text: { content: `${title}\n${body}` } }) }
+  }
+  return { headers: json, body: JSON.stringify({ title, message: body, kind: extra.kind ?? 'raw', time: new Date().toISOString() }) }
+}
+
+export async function pushOut(settings, title, message, extra = {}) {
+  if (settings.pushEnabled !== true) return { ok: false, error: 'push-disabled' }
+  const url = str(settings.pushUrl, '')
+  if (!/^https?:\/\//i.test(url)) return { ok: false, error: 'push-url-invalid' }
+  const payload = pushPayload(settings, title, message, extra)
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: payload.headers,
+      body: payload.body,
+      signal: typeof AbortSignal?.timeout === 'function' ? AbortSignal.timeout(8000) : undefined,
+    })
+    const text = await response.text().catch(() => '')
+    return { ok: response.ok, status: response.status, body: text.slice(0, 200) }
+  } catch (error) {
+    return { ok: false, error: String(error?.message ?? error) }
+  }
+}
+
+export async function runDigest(ctx, getSettings, { force = false } = {}) {
+  const settings = getSettings()
+  if (!force && settings.digestEnabled !== true) return { ok: false, error: 'digest-disabled' }
+  const entries = readHistory(settings)
+  let balance = null
+  if (settings.digestIncludeBalance) {
+    const read = await readAccountBalance(ctx).catch(() => null)
+    if (read && read.balance !== undefined) balance = read
+  }
+  const title = str(settings.digestTitle, '今日提醒日报')
+  const message = digestMessage(settings, entries, balance)
+  const card = await notify('raw', { title, message, seconds: Math.max(20, settings.seconds) }, settings)
+  let push = null
+  if (settings.pushEnabled && settings.pushDigest && settings.dryRun !== true) {
+    push = await pushOut(settings, title, message, { kind: 'digest' })
+  }
+  if (!force) await saveBalanceState(ctx, { digestLastDate: todayKey() })
+  return { ok: true, title, message, card, push }
+}
+
+function registerDigestLoop(ctx, getSettings) {
+  let running = false
+  const tick = async () => {
+    if (running) return
+    const settings = getSettings()
+    if (settings.digestEnabled !== true && settings.digestAlertCount <= 0) return
+    running = true
+    try {
+      const now = new Date()
+      if (digestDue(settings, now)) await runDigest(ctx, getSettings).catch(() => {})
+      if (settings.digestAlertCount > 0) {
+        const today = todayKey(now)
+        if (settings.digestAlertDate !== today) {
+          const entries = readHistory(settings)
+          const count = entries.filter((e) => dayKeyOf(num(e?.at, 0)) === today).length
+          if (count >= settings.digestAlertCount) {
+            await saveBalanceState(ctx, { digestAlertDate: today })
+            await notify(
+              'raw',
+              { title: '提醒有点多', message: `今天已经弹了 ${count} 条提醒，超过你设的 ${settings.digestAlertCount} 条上限。` },
+              settings,
+            )
+          }
+        }
+      }
+    } catch {
+      /* 定时器里出错不影响下一轮 */
+    } finally {
+      running = false
+    }
+  }
+  const timer = setInterval(() => {
+    void tick()
+  }, 60 * 1000)
+  if (typeof timer?.unref === 'function') timer.unref()
+  ctx.effect(() => () => clearInterval(timer), 'dsh-reminder-notify: digest watcher')
+}
+
+function registerDigestRoute(ctx, getSettings) {
+  const web = typeof ctx.get === 'function' ? ctx.get('webServer') : undefined
+  if (web === undefined || web === null || typeof web.register !== 'function') {
+    ctx.logger?.warn?.('dsh-reminder-notify: webServer is unavailable, the digest panel stays hidden')
+    return
+  }
+  const reply = (res, status, payload) => {
+    res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+    res.end(JSON.stringify(payload))
+  }
+  const route = {
+    kind: 'exact',
+    path: DIGEST_ROUTE,
+    handler: async (req, res) => {
+      try {
+        const settings = getSettings()
+        const method = (req.method ?? 'GET').toUpperCase()
+        if (method === 'GET') {
+          const entries = readHistory(settings)
+          let balance = null
+          if (settings.digestIncludeBalance) {
+            const read = await readAccountBalance(ctx).catch(() => null)
+            if (read && read.balance !== undefined) balance = read
+          }
+          return reply(res, 200, {
+            ok: true,
+            enabled: settings.digestEnabled,
+            time: settings.digestTime,
+            lastDate: settings.digestLastDate,
+            alertCount: settings.digestAlertCount,
+            pushEnabled: settings.pushEnabled,
+            pushFormat: settings.pushFormat,
+            title: str(settings.digestTitle, '今日提醒日报'),
+            message: digestMessage(settings, entries, balance),
+          })
+        }
+        if (method !== 'POST') return reply(res, 405, { ok: false, error: 'use GET or POST' })
+        await readJsonBody(req)
+        const result = await runDigest(ctx, getSettings, { force: true })
+        return reply(res, 200, { ok: result.ok !== false, title: result.title, message: result.message, push: result.push })
+      } catch (error) {
+        return reply(res, 500, { ok: false, error: String(error?.message ?? error) })
+      }
+    },
+  }
+  ctx.effect(() => {
+    const dispose = web.register(route)
+    return () => {
+      if (typeof dispose === 'function') dispose()
+    }
+  }, 'dsh-reminder-notify: digest route')
+}
+
 function registerHistoryRoute(ctx, getSettings) {
   const web = typeof ctx.get === 'function' ? ctx.get('webServer') : undefined
   if (web === undefined || web === null || typeof web.register !== 'function') {
@@ -1335,12 +1557,14 @@ export function apply(ctx, config) {
   registerPreviewRoute(ctx, () => settingsOf(config))
   registerBalanceRoute(ctx, () => settingsOf(config), config)
   registerHistoryRoute(ctx, () => settingsOf(config))
+  registerDigestRoute(ctx, () => settingsOf(config))
+  registerDigestLoop(ctx, () => settingsOf(config))
   const tools = typeof ctx.get === 'function' ? ctx.get('tools') : ctx.tools
   if (tools === undefined || tools === null || typeof tools.register !== 'function') {
     ctx.logger?.warn?.('dsh-reminder-notify: tools service is unavailable, notify_user was not registered')
     return
   }
-  const definition = toolDefinition(() => settingsOf(config))
+  const definition = toolDefinition(() => settingsOf(config), ctx)
   const dispose = tools.register(definition)
   ctx.effect(() => dispose, 'dsh-reminder-notify: notify_user tool')
 }

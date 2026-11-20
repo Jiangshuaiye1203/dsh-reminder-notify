@@ -22,6 +22,7 @@ window.__ModuleLoader__.load({
     const BALANCE_ROUTE = '/dsh-reminder-notify/balance'
     // 0.11 新增：提醒历史（GET 拿统计+最近记录，POST { mode: 'clear' } 清空）。
     const HISTORY_ROUTE = '/dsh-reminder-notify/history'
+    const DIGEST_ROUTE = '/dsh-reminder-notify/digest'
     // 下拉按扩展名分组：wav 一组、mp3 一组……组内按文件名排序，一眼能看出格式。
     function groupAudioFiles(files) {
       const byExt = new Map()
@@ -250,6 +251,7 @@ window.__ModuleLoader__.load({
     Object.assign(zh, {
       groupQueue: '排队与免打扰',
       groupHistory: '历史与统计',
+      groupDigest: '日报与推送',
       speakEnabled: '朗读提醒内容',
       buttonsEnabled: '卡片显示按钮',
       snoozeMinutes: '「稍后提醒」延后分钟',
@@ -262,9 +264,23 @@ window.__ModuleLoader__.load({
       quietMode: '免打扰处理方式',
       quietModeHold: '留到结束后补弹',
       quietModeSkip: '直接跳过',
+      pushFormatWecom: '企业微信机器人',
+      pushFormatServerchan: 'Server 酱',
+      pushFormatJson: '通用 JSON',
+      pushFormatText: '纯文本',
       compactOnFullscreen: '全屏时用紧凑卡片',
       historyEnabled: '记录提醒历史',
       historyLimit: '历史保留条数',
+      digestEnabled: '每日提醒日报',
+      digestTime: '日报时间',
+      digestTitle: '日报标题',
+      digestIncludeBalance: '日报带上余额',
+      digestAlertCount: '当天条数预警',
+      pushEnabled: '推送到手机',
+      pushUrl: '推送地址',
+      pushFormat: '推送格式',
+      pushDecide: '「需要你来决定」也推送',
+      pushDigest: '日报也推送',
       speakEnabledHint: '用系统语音把标题和正文念出来；要装中文语音包，没装就静音。',
       buttonsEnabledHint: '卡片右下角给出「知道了」和「稍后提醒」；关掉就只剩自动关闭，点卡片仍可提前关。',
       snoozeMinutesHint: '点「稍后提醒」后隔多久再弹一次。',
@@ -278,6 +294,22 @@ window.__ModuleLoader__.load({
       compactOnFullscreenHint: '检测到前台是全屏应用时改用窄卡片，少挡内容。',
       historyEnabledHint: '每条提醒的结果都会记下来（自动关闭 / 点了按钮 / 稍后提醒 / 免打扰跳过）。',
       historyLimitHint: '超过这个条数就丢掉最旧的记录。',
+      digestEnabledHint: '每天到点弹一条「今天弹了几条、你点掉了几条」的日报。',
+      digestTimeHint: 'HH:MM 24 小时制，一天只发一条；关机错过了不补。',
+      digestTitleHint: '日报卡片的标题，例如「今日提醒日报」。',
+      digestIncludeBalanceHint: '日报末尾附上当前 DeepSeek 余额。',
+      digestAlertCountHint: '当天提醒超过这个条数时，额外弹一张「提醒有点多」的预警卡；0 = 关闭。',
+      pushUrlHint: '企业微信机器人或 Server 酱的 webhook 地址，只需要填 URL 本身。',
+      pushFormatHint: 'wecom = 企业微信机器人；serverchan = Server 酱；json = 通用 JSON；text = 纯文本。',
+      pushDecideHint: '需要你拍板的提醒也发到手机，人不在电脑前也能收到。',
+      pushDigestHint: '日报也发到手机。',
+      digestStatus: '日报预览',
+      digestRefresh: '刷新预览',
+      digestSend: '现在发一条',
+      digestSending: '发送中…',
+      digestLoading: '正在读取…',
+      digestUnavailable: '日报接口不可用',
+      digestDisabled: '日报未开启（开启后每天到点自动发）',
       historyStatus: '提醒统计',
       historyLoading: '读取中…',
       historyUnavailable: '读不到历史文件：',
@@ -302,6 +334,7 @@ window.__ModuleLoader__.load({
     Object.assign(en, {
       groupQueue: 'Queue & quiet hours',
       groupHistory: 'History & stats',
+      groupDigest: 'Digest & push',
       speakEnabled: 'Speak the reminder',
       buttonsEnabled: 'Show card buttons',
       snoozeMinutes: 'Snooze minutes',
@@ -314,9 +347,23 @@ window.__ModuleLoader__.load({
       quietMode: 'Quiet-hours behaviour',
       quietModeHold: 'Hold until it ends',
       quietModeSkip: 'Skip it',
+      pushFormatWecom: 'WeCom bot',
+      pushFormatServerchan: 'ServerChan',
+      pushFormatJson: 'Generic JSON',
+      pushFormatText: 'Plain text',
       compactOnFullscreen: 'Compact card on fullscreen',
       historyEnabled: 'Keep reminder history',
       historyLimit: 'History entries kept',
+      digestEnabled: 'Daily digest',
+      digestTime: 'Digest time',
+      digestTitle: 'Digest title',
+      digestIncludeBalance: 'Include balance',
+      digestAlertCount: 'Daily alert threshold',
+      pushEnabled: 'Push to phone',
+      pushUrl: 'Push URL',
+      pushFormat: 'Push format',
+      pushDecide: 'Push decisions too',
+      pushDigest: 'Push the digest too',
       speakEnabledHint: 'Read the title and body with the system voice; needs a Chinese voice pack, otherwise silent.',
       buttonsEnabledHint: 'Show “Got it” and “Snooze” on the card. Off means auto-dismiss only; clicking the card still closes it.',
       snoozeMinutesHint: 'How long to wait before the snoozed reminder pops again.',
@@ -330,6 +377,22 @@ window.__ModuleLoader__.load({
       compactOnFullscreenHint: 'Use a narrower card when a fullscreen app is in front.',
       historyEnabledHint: 'Every reminder result is recorded (auto-close / button / snooze / quiet-skip).',
       historyLimitHint: 'Older entries are dropped past this count.',
+      digestEnabledHint: 'Pops one daily card with how many reminders fired and how you handled them.',
+      digestTimeHint: 'HH:MM, 24-hour. One digest per day; a missed day is not replayed.',
+      digestTitleHint: 'Title of the digest card.',
+      digestIncludeBalanceHint: 'Append the current DeepSeek balance to the digest.',
+      digestAlertCountHint: 'When today passes this many reminders, pop one extra "a lot of reminders" card; 0 = off.',
+      pushUrlHint: 'A WeCom bot or ServerChan webhook URL. Only the URL is needed.',
+      pushFormatHint: 'wecom = WeCom bot; serverchan = ServerChan; json = generic JSON; text = plain text.',
+      pushDecideHint: 'Also push "needs your decision" reminders, so you get them away from the PC.',
+      pushDigestHint: 'Also push the daily digest.',
+      digestStatus: 'Digest preview',
+      digestRefresh: 'Refresh preview',
+      digestSend: 'Send one now',
+      digestSending: 'Sending…',
+      digestLoading: 'Loading…',
+      digestUnavailable: 'Digest endpoint unavailable',
+      digestDisabled: 'Digest is off (turn it on to send daily)',
       historyStatus: 'Reminder stats',
       historyLoading: 'Reading…',
       historyUnavailable: 'Cannot read the history file: ',
@@ -426,6 +489,17 @@ window.__ModuleLoader__.load({
       { key: 'compactOnFullscreen', group: 'queue', kind: 'boolean' },
       { key: 'historyEnabled', group: 'history', kind: 'boolean' },
       { key: 'historyLimit', group: 'history', kind: 'number' },
+      // 0.12：日报与手机推送。
+      { key: 'digestEnabled', group: 'digest', kind: 'boolean' },
+      { key: 'digestTime', group: 'digest', kind: 'text' },
+      { key: 'digestTitle', group: 'digest', kind: 'text' },
+      { key: 'digestIncludeBalance', group: 'digest', kind: 'boolean' },
+      { key: 'digestAlertCount', group: 'digest', kind: 'number' },
+      { key: 'pushEnabled', group: 'digest', kind: 'boolean' },
+      { key: 'pushUrl', group: 'digest', kind: 'text' },
+      { key: 'pushFormat', group: 'digest', kind: 'select', options: ['wecom', 'serverchan', 'json', 'text'], optionLabels: ['pushFormatWecom', 'pushFormatServerchan', 'pushFormatJson', 'pushFormatText'] },
+      { key: 'pushDecide', group: 'digest', kind: 'boolean' },
+      { key: 'pushDigest', group: 'digest', kind: 'boolean' },
       { key: 'hostMode', group: 'host', kind: 'select', options: ['script', 'exe'], optionLabels: ['hostModeScript', 'hostModeExe'] },
       { key: 'scriptPath', group: 'host', kind: 'text' },
       { key: 'powershellPath', group: 'host', kind: 'text' },
@@ -472,10 +546,20 @@ window.__ModuleLoader__.load({
       compactOnFullscreen: 'compactOnFullscreenHint',
       historyEnabled: 'historyEnabledHint',
       historyLimit: 'historyLimitHint',
+      digestEnabled: 'digestEnabledHint',
+      digestTime: 'digestTimeHint',
+      digestTitle: 'digestTitleHint',
+      digestIncludeBalance: 'digestIncludeBalanceHint',
+      digestAlertCount: 'digestAlertCountHint',
+      pushEnabled: 'pushUrlHint',
+      pushUrl: 'pushUrlHint',
+      pushFormat: 'pushFormatHint',
+      pushDecide: 'pushDecideHint',
+      pushDigest: 'pushDigestHint',
     }
 
-    const GROUPS = ['basic', 'audio', 'look', 'queue', 'history', 'balance', 'host']
-    const GROUP_LABELS = { basic: 'groupBasic', audio: 'groupAudio', look: 'groupLook', queue: 'groupQueue', history: 'groupHistory', balance: 'groupBalance', host: 'groupHost' }
+    const GROUPS = ['basic', 'audio', 'look', 'queue', 'history', 'digest', 'balance', 'host']
+    const GROUP_LABELS = { basic: 'groupBasic', audio: 'groupAudio', look: 'groupLook', queue: 'groupQueue', history: 'groupHistory', digest: 'groupDigest', balance: 'groupBalance', host: 'groupHost' }
 
     function sameValue(a, b) {
       return JSON.stringify(a) === JSON.stringify(b)
@@ -499,6 +583,8 @@ window.__ModuleLoader__.load({
       const [balanceBusy, setBalanceBusy] = React.useState(false)
       const [history, setHistory] = React.useState(null)
       const [historyBusy, setHistoryBusy] = React.useState(false)
+      const [digest, setDigest] = React.useState(null)
+      const [digestBusy, setDigestBusy] = React.useState(false)
 
       React.useEffect(() => {
         if (typeof fetch !== 'function') {
@@ -559,6 +645,7 @@ window.__ModuleLoader__.load({
       React.useEffect(() => {
         refreshBalance()
         refreshHistory()
+        refreshDigest()
       }, [])
 
       if (props.view === 'summary') {
@@ -792,6 +879,44 @@ window.__ModuleLoader__.load({
           })
       }
 
+      function digestFetch(options) {
+        setDigestBusy(true)
+        Promise.resolve()
+          .then(() => fetch(DIGEST_ROUTE, options))
+          .then((response) => (response && typeof response.json === 'function' ? response.json() : Promise.resolve(null)))
+          .then((data) => {
+            setDigestBusy(false)
+            if (data && typeof data === 'object') setDigest(data)
+            else setDigest({ ok: false, error: 'empty-response' })
+          })
+          .catch((error) => {
+            setDigestBusy(false)
+            setDigest({ ok: false, error: String((error && error.message) || error) })
+          })
+      }
+
+      function refreshDigest() {
+        digestFetch({ headers: { accept: 'application/json' } })
+      }
+
+      function sendDigest() {
+        digestFetch({
+          method: 'POST',
+          headers: { 'content-type': 'application/json', accept: 'application/json' },
+          body: JSON.stringify({ mode: 'send' }),
+        })
+      }
+
+      function digestText() {
+        const label = typeof t === 'function' ? t : (key) => key
+        if (digest === null) return label('digestLoading')
+        if (digest.ok === false) {
+          return label('digestUnavailable') + (digest.error ? '（' + String(digest.error) + '）' : '')
+        }
+        if (digest.enabled === false) return label('digestDisabled')
+        return String(digest.message || '').split('\n').join(' / ')
+      }
+
       function refreshHistory() {
         historyFetch({ headers: { accept: 'application/json' } })
       }
@@ -979,6 +1104,35 @@ window.__ModuleLoader__.load({
               ),
             )
           }
+        }
+        if (group === 'digest') {
+          const label = typeof t === 'function' ? t : (key) => key
+          rows.push(
+            h(
+              'div',
+              { className: 'drn-row', key: 'digest-status' },
+              h(
+                'div',
+                { className: 'drn-row-main' },
+                h('div', { className: 'drn-label' }, label('digestStatus')),
+                h('div', { className: 'drn-hint' }, digestText()),
+              ),
+              h(
+                'div',
+                { className: 'drn-pick' },
+                h(
+                  'button',
+                  { type: 'button', className: 'drn-btn small', disabled: digestBusy, onClick: refreshDigest },
+                  label('digestRefresh'),
+                ),
+                h(
+                  'button',
+                  { type: 'button', className: 'drn-btn small', disabled: digestBusy, onClick: sendDigest },
+                  label(digestBusy ? 'digestSending' : 'digestSend'),
+                ),
+              ),
+            ),
+          )
         }
         if (group === 'balance') {
           rows.push(
