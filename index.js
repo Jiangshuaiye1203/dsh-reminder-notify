@@ -1621,12 +1621,17 @@ async function readAccountBalance(ctx) {
 }
 
 // 写回状态（基线和已报阈值）：都是 volatile 字段，写完立刻生效，不会重启插件。
+// 0.31.1：写回成功的内部状态（digestLastDate / 余额基线 / 条件状态）要立刻被 getSettings() 看到，
+// 否则同一个 config 对象不会变，日报会每分钟判定「今天还没发」而连弹。
+const runtimePatch = {}
+
 async function saveBalanceState(ctx, patch) {
   const entry = ctx.fiber?.entry
   const editor = typeof ctx.get === 'function' ? ctx.get('configEditor') : undefined
   if (entry === undefined || editor === undefined || typeof editor.edit !== 'function') return false
   try {
     await editor.edit(entry, (current) => ({ ...current, ...patch }))
+    Object.assign(runtimePatch, patch)
     return true
   } catch {
     return false
@@ -3615,7 +3620,16 @@ function nodeKind(kind) {
 }
 
 export function apply(ctx, config) {
-  const getSettings = () => settingsOf(config)
+  const getSettings = () => settingsOf({ ...config, ...runtimePatch })
+  // 0.31.1：启动时若历史里今天已有日报，先把日期补上，避免重启/装完后连弹。
+  try {
+    const bootSettings = getSettings()
+    if (bootSettings.digestEnabled === true) {
+      const entries = readHistory(bootSettings)
+      if (digestShownToday(bootSettings, entries)) runtimePatch.digestLastDate = todayKey()
+    }
+  } catch {}
+
   if (typeof ctx.provide === 'function') {
     // 服务在 apply 里一次性注册；ctx.provide 自己挂在本 fiber 上，插件卸载时会自动回收。
     ctx.provide(SERVICE_NAME, serviceOf(ctx, getSettings))
