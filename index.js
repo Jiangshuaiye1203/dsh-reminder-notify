@@ -1140,6 +1140,86 @@ const BALANCE_ROUTE = '/dsh-reminder-notify/balance'
 const HISTORY_ROUTE = '/dsh-reminder-notify/history'
 const REPLIES_ROUTE = '/dsh-reminder-notify/replies'
 const MOBILE_ROUTE = '/dsh-reminder-notify/mobile'
+
+// 0.23:手机回话可以带附件（图片/语音）。文件落在本机用户目录下，不进公网。
+const MOBILE_UPLOAD_LIMIT = 12 * 1024 * 1024
+const MOBILE_ATTACH_KINDS = {
+  'image/jpeg': 'jpg',
+  'image/png': 'png',
+  'image/webp': 'webp',
+  'image/gif': 'gif',
+  'audio/webm': 'webm',
+  'audio/wav': 'wav',
+  'audio/x-wav': 'wav',
+  'audio/mpeg': 'mp3',
+  'audio/mp4': 'm4a',
+  'audio/ogg': 'ogg',
+}
+
+export function mobileUploadDir() {
+  return path.join(os.homedir(), '.dsh', 'dsh-reminder-notify', 'uploads')
+}
+
+function pad2(value) {
+  return String(value).padStart(2, '0')
+}
+
+export function uploadNameFor(type, now = new Date()) {
+  const ext = MOBILE_ATTACH_KINDS[String(type ?? '').toLowerCase()]
+  if (ext === undefined) return null
+  const stamp = `${now.getFullYear()}${pad2(now.getMonth() + 1)}${pad2(now.getDate())}-${pad2(now.getHours())}${pad2(now.getMinutes())}${pad2(now.getSeconds())}`
+  return `${stamp}-${Math.random().toString(36).slice(2, 8)}.${ext}`
+}
+
+export function attachmentSummaryOf(entry) {
+  const list = Array.isArray(entry?.attachments) ? entry.attachments : []
+  if (list.length === 0) return ''
+  const names = list.map((item) => str(item?.name, 'file'))
+  return `（附 ${list.length} 个：${names.join('、')}）`
+}
+
+export function mobileAttachmentsOf(raw, dir = mobileUploadDir()) {
+  if (!Array.isArray(raw)) return []
+  const root = path.resolve(dir)
+  const out = []
+  for (const item of raw.slice(0, 3)) {
+    const file = str(item?.file, '')
+    if (file === '') continue
+    const resolved = path.resolve(file)
+    if (resolved !== root && !resolved.startsWith(root + path.sep)) continue
+    let size = num(item?.size, 0)
+    try {
+      if (size <= 0) size = fs.statSync(resolved).size
+    } catch {
+      continue
+    }
+    out.push({
+      name: str(item?.name, path.basename(resolved)).slice(0, 120),
+      file: resolved,
+      type: str(item?.type, ''),
+      size: Math.max(0, Math.round(size)),
+    })
+  }
+  return out
+}
+
+function readRawBody(req, limit) {
+  return new Promise((resolve, reject) => {
+    let size = 0
+    const chunks = []
+    req.on('data', (chunk) => {
+      size += chunk.length
+      if (size > limit) {
+        reject(new Error('too-large'))
+        req.destroy()
+        return
+      }
+      chunks.push(chunk)
+    })
+    req.on('end', () => resolve(Buffer.concat(chunks)))
+    req.on('error', reject)
+  })
+}
 const EXPORT_ROUTE = '/dsh-reminder-notify/export'
 const DIGEST_ROUTE = '/dsh-reminder-notify/digest'
 const RECUR_ROUTE = '/dsh-reminder-notify/recurring'
@@ -2281,6 +2361,13 @@ li { background: #1b212b; border-radius: 10px; padding: 10px 12px; margin-bottom
 form { display: flex; gap: 8px; position: sticky; bottom: 0; background: #14181f; padding-top: 8px; }
 input { flex: 1; padding: 11px 12px; border-radius: 10px; border: 1px solid #2b3442; background: #1b212b; color: #e6edf3; font-size: 15px; }
 button { padding: 11px 16px; border-radius: 10px; border: 0; background: #2f81f7; color: #fff; font-size: 15px; }
+.att { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 12px 8px; }
+.att:empty { display: none; }
+.chip { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; padding: 4px 8px; border-radius: 999px; background: #232a35; color: #c9d4e3; }
+.chip b { font-weight: 500; }
+.chip button { border: 0; background: transparent; color: #8b97a8; font-size: 14px; line-height: 1; cursor: pointer; }
+.pick { display: flex; gap: 8px; padding: 0 12px 8px; }
+.pick button { flex: 1; border: 1px solid #2f3a4a; background: #1b212b; color: #c9d4e3; border-radius: 8px; padding: 8px 0; font-size: 13px; }
 .install { margin: 0 0 14px; width: 100%; padding: 11px 16px; border-radius: 10px; border: 1px solid #2b3442; background: #1b212b; color: #e6edf3; font-size: 15px; }
 #tip { color: #8b98a8; font-size: 12px; margin-top: 8px; min-height: 16px; }
 </style></head><body>
@@ -2293,6 +2380,14 @@ button { padding: 11px 16px; border-radius: 10px; border: 0; background: #2f81f7
   <div class="stat"><b>${stats.byKind.decide ?? 0}</b><span>要你决定</span></div>
 </div>
 <ul>${rows === '' ? '<li><div class="msg">还没有提醒</div></li>' : rows}</ul>
+<div id="att" class="att"></div>
+<div class="pick">
+<button type="button" id="pickImg">拍照 / 选图</button>
+<button type="button" id="pickRec">录一段话</button>
+<button type="button" id="pickAudio">选音频</button>
+</div>
+<input type="file" id="fileImg" accept="image/*" capture="environment" hidden>
+<input type="file" id="fileAudio" accept="audio/*" hidden>
 <form id="f"><input id="m" maxlength="300" placeholder="回一句话给电脑上的模型"><button type="submit">发送</button></form>
 <div id="tip"></div>
 <script>
@@ -2327,14 +2422,72 @@ installBtn.addEventListener('click', async () => {
   installEvent = null;
   installBtn.hidden = true;
 });
+const attachments = [];
+const attBox = document.getElementById('att');
+const toast = (text) => { const box = document.getElementById('tip'); if (box) box.textContent = text; };
+const renderAtt = () => {
+  attBox.innerHTML = '';
+  attachments.forEach((item, index) => {
+    const chip = document.createElement('span');
+    chip.className = 'chip';
+    const name = document.createElement('b');
+    name.textContent = item.name + ' · ' + Math.max(1, Math.round(item.size / 1024)) + 'K';
+    const del = document.createElement('button');
+    del.type = 'button';
+    del.textContent = '×';
+    del.addEventListener('click', () => { attachments.splice(index, 1); renderAtt(); });
+    chip.appendChild(name);
+    chip.appendChild(del);
+    attBox.appendChild(chip);
+  });
+};
+const uploadFile = async (file) => {
+  if (!file) return;
+  if (attachments.length >= 3) { toast('最多带 3 个附件'); return; }
+  if (file.size > 12 * 1024 * 1024) { toast('这个文件太大了（上限 12MB）'); return; }
+  toast('上传中…');
+  try {
+    const url = '${MOBILE_ROUTE}/upload' + location.search + '&name=' + encodeURIComponent(file.name || 'file');
+    const r = await fetch(url, { method: 'POST', headers: { 'content-type': file.type || 'application/octet-stream' }, body: file });
+    const data = await r.json();
+    if (data && data.ok) { attachments.push({ name: data.name, file: data.file, type: data.type, size: data.size }); renderAtt(); toast('已带上 ' + data.name); }
+    else { toast('没传上去：' + ((data && data.error) || '未知原因')); }
+  } catch (err) { toast('没传上去：' + err.message); }
+};
+const pick = (input) => input.addEventListener('change', () => { uploadFile(input.files && input.files[0]); input.value = ''; });
+pick(document.getElementById('fileImg'));
+pick(document.getElementById('fileAudio'));
+document.getElementById('pickImg').addEventListener('click', () => document.getElementById('fileImg').click());
+document.getElementById('pickAudio').addEventListener('click', () => document.getElementById('fileAudio').click());
+let recorder = null;
+let recChunks = [];
+document.getElementById('pickRec').addEventListener('click', async () => {
+  const button = document.getElementById('pickRec');
+  if (recorder && recorder.state === 'recording') { recorder.stop(); button.textContent = '录一段话'; return; }
+  if (!navigator.mediaDevices || typeof MediaRecorder === 'undefined') { toast('这个浏览器不支持录音，用「选音频」'); return; }
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    recorder = new MediaRecorder(stream);
+    recChunks = [];
+    recorder.addEventListener('dataavailable', (event) => { if (event.data && event.data.size > 0) recChunks.push(event.data); });
+    recorder.addEventListener('stop', () => {
+      stream.getTracks().forEach((track) => track.stop());
+      const blob = new Blob(recChunks, { type: 'audio/webm' });
+      uploadFile(new File([blob], 'voice-' + Date.now() + '.webm', { type: 'audio/webm' }));
+    });
+    recorder.start();
+    button.textContent = '停止录音';
+    toast('正在录音，说完点「停止录音」');
+  } catch (err) { toast('打不开麦克风：' + err.message); }
+});
 const f = document.getElementById('f'); const m = document.getElementById('m'); const tip = document.getElementById('tip');
 f.addEventListener('submit', async (e) => {
-  e.preventDefault(); const text = m.value.trim(); if (!text) return;
+  e.preventDefault(); const text = m.value.trim(); if (!text && attachments.length === 0) return;
   tip.textContent = '发送中…';
   try {
-    const r = await fetch('${MOBILE_ROUTE}/reply' + location.search, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ message: text }) });
+    const r = await fetch('${MOBILE_ROUTE}/reply' + location.search, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ message: text, attachments: attachments.slice() }) });
     const data = await r.json();
-    if (data && data.ok) { tip.textContent = '已发送，电脑上的模型能看到'; m.value = ''; }
+    if (data && data.ok) { tip.textContent = '已发送，电脑上的模型能看到'; m.value = ''; attachments.length = 0; renderAtt(); }
     else { tip.textContent = '没发出去：' + ((data && data.error) || '未知原因'); }
   } catch (err) { tip.textContent = '没发出去：' + err.message; }
 });
@@ -2359,7 +2512,7 @@ export function phonePromptText(settings, now = Date.now()) {
     const at = new Date(Number(entry.at ?? now))
     const hh = String(at.getHours()).padStart(2, '0')
     const mm = String(at.getMinutes()).padStart(2, '0')
-    return `- ${hh}:${mm} 手机回话：${str(entry.reply, '')}`
+    return `- ${hh}:${mm} 手机回话：${str(entry.reply, '')}${attachmentSummaryOf(entry)}`
   })
   return `用户刚从手机上回了话（${fresh.length} 条，已经看过就不用再问）：\n${lines.join('\n')}`
 }
@@ -2492,7 +2645,8 @@ function registerMobileRoute(ctx, getSettings) {
       if (req.method !== 'POST') return reply(res, 405, JSON.stringify({ ok: false, error: 'use POST' }))
       const body = await readJsonBody(req)
       const text = str(body?.message, '').trim().slice(0, 300)
-      if (text === '') return reply(res, 400, JSON.stringify({ ok: false, error: 'empty-message' }))
+      const attachments = mobileAttachmentsOf(body?.attachments)
+      if (text === '' && attachments.length === 0) return reply(res, 400, JSON.stringify({ ok: false, error: 'empty-message' }))
       appendHistory(settings, {
         at: Date.now(),
         kind: 'raw',
@@ -2503,17 +2657,50 @@ function registerMobileRoute(ctx, getSettings) {
         snoozed: false,
         quiet: false,
         reply: text,
+        attachments,
         via: 'mobile',
       })
-      emitServiceEvent('replied', { kind: 'raw', title: '手机回话', reply: text, via: 'mobile' })
+      emitServiceEvent('replied', { kind: 'raw', title: '手机回话', reply: text, attachments: attachments.length, via: 'mobile' })
       if (settings.pushEnabled === true && settings.pushReply === true && settings.dryRun !== true) {
-        const pushed = pushOut(settings, '手机回话', text, { kind: 'reply', time: new Date().toISOString() })
+        const pushed = pushOut(settings, '手机回话', `${text}${attachmentSummaryOf({ attachments })}`, { kind: 'reply', time: new Date().toISOString() })
         if (pushed !== null && typeof pushed.catch === 'function') pushed.catch(() => {})
       }
       return reply(res, 200, JSON.stringify({ ok: true, replies: repliesOf(settings, 5).length }))
     },
   }
   mountRoute(ctx, replyRoute, 'dsh-reminder-notify: mobile reply route')
+
+  const uploadRoute = {
+    kind: 'exact',
+    path: `${MOBILE_ROUTE}/upload`,
+    handler: async (req, res) => {
+      const settings = getSettings()
+      const url = new URL(req.url ?? `${MOBILE_ROUTE}/upload`, 'http://127.0.0.1')
+      if (!authorized(settings, url.searchParams.get('t'))) return unauthorized(res)
+      if (req.method !== 'POST') return reply(res, 405, JSON.stringify({ ok: false, error: 'use POST' }))
+      const type = str(req.headers['content-type'], 'application/octet-stream').split(';')[0].trim().toLowerCase()
+      const name = uploadNameFor(type)
+      if (name === null) return reply(res, 415, JSON.stringify({ ok: false, error: 'unsupported-type', type }))
+      let body = null
+      try {
+        body = await readRawBody(req, MOBILE_UPLOAD_LIMIT)
+      } catch {
+        return reply(res, 413, JSON.stringify({ ok: false, error: 'too-large' }))
+      }
+      if (body === null || body.length === 0) return reply(res, 400, JSON.stringify({ ok: false, error: 'empty-file' }))
+      try {
+        const dir = mobileUploadDir()
+        fs.mkdirSync(dir, { recursive: true })
+        const target = path.join(dir, name)
+        fs.writeFileSync(target, body)
+        const label = str(url.searchParams.get('name'), name).slice(-60)
+        return reply(res, 200, JSON.stringify({ ok: true, file: target, name: label, type, size: body.length }))
+      } catch (error) {
+        return reply(res, 500, JSON.stringify({ ok: false, error: 'write-failed', detail: String(error && error.message) }))
+      }
+    },
+  }
+  mountRoute(ctx, uploadRoute, 'dsh-reminder-notify: mobile upload route')
 
   const linkRoute = {
     kind: 'exact',

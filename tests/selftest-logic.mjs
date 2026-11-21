@@ -3,7 +3,7 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { condStateAfter, customButtonsOf, customButtonsSpec, escapeHtml, mobileLinkOf, mobilePageOf, phonePromptText, repliesOf, resetPhoneSeen, unreadPhoneReplies, digestDue, digestMessage, doctorReport, evaluateConditions, historyStats, inQuietHours, nextRunAfter, parseClock, parseCustomButtons, parseEvery, pushPayload, quietEndAt, todayKey, toastArgsOf } from '../index.js'
+import { attachmentSummaryOf, mobileAttachmentsOf, uploadNameFor, condStateAfter, customButtonsOf, customButtonsSpec, escapeHtml, mobileLinkOf, mobilePageOf, phonePromptText, repliesOf, resetPhoneSeen, unreadPhoneReplies, digestDue, digestMessage, doctorReport, evaluateConditions, historyStats, inQuietHours, nextRunAfter, parseClock, parseCustomButtons, parseEvery, pushPayload, quietEndAt, todayKey, toastArgsOf } from '../index.js'
 
 let failed = 0
 function check(label, actual, expected) {
@@ -233,6 +233,37 @@ check('phonePromptText 不含桌面回话', phonePrompt.includes('桌面上说�
 check('phonePromptText 第二次为空', phonePromptText(phoneSettings, nowMs + 2000), '')
 resetPhoneSeen(nowMs + 3000)
 check('resetPhoneSeen 之后不再提醒', phonePromptText(phoneSettings, nowMs + 4000), '')
+// 0.23：手机回话带附件
+check('uploadNameFor 按类型给扩展名', uploadNameFor('image/png', new Date(2026, 10, 21, 7, 8, 9)).startsWith('20261121-070809-'), true)
+check('uploadNameFor 末尾是 png', uploadNameFor('image/png', new Date(2026, 10, 21, 7, 8, 9)).endsWith('.png'), true)
+check('uploadNameFor 语音给 webm', uploadNameFor('audio/webm').endsWith('.webm'), true)
+check('uploadNameFor 未知类型返回 null', uploadNameFor('application/zip'), null)
+check('attachmentSummaryOf 空附件为空串', attachmentSummaryOf({}), '')
+check('attachmentSummaryOf 列名字', attachmentSummaryOf({ attachments: [{ name: 'a.png' }, { name: 'b.webm' }] }), '（附 2 个：a.png、b.webm）')
+const uploadRoot = path.join(os.tmpdir(), 'drn-upload-check')
+fs.mkdirSync(uploadRoot, { recursive: true })
+const inside = path.join(uploadRoot, 'ok.png')
+fs.writeFileSync(inside, Buffer.from([1, 2, 3]))
+const outside = path.join(os.tmpdir(), 'drn-outside.png')
+fs.writeFileSync(outside, Buffer.from([1]))
+check('mobileAttachmentsOf 只收上传目录里的', mobileAttachmentsOf([{ name: 'ok.png', file: inside }], uploadRoot).map((it) => it.name), ['ok.png'])
+check('mobileAttachmentsOf 拦目录外文件', mobileAttachmentsOf([{ name: 'x.png', file: outside }], uploadRoot), [])
+check('mobileAttachmentsOf 最多三个', mobileAttachmentsOf([inside, inside, inside, inside].map((file) => ({ name: 'ok.png', file })), uploadRoot).length, 3)
+check('mobileAttachmentsOf 读出文件大小', mobileAttachmentsOf([{ name: 'ok.png', file: inside }], uploadRoot)[0].size, 3)
+const phonePage = mobilePageOf({ mobileToken: 'k' }, [], new Date(2026, 10, 21, 9, 0, 0))
+check('页面有拍照入口', phonePage.includes('拍照 / 选图'), true)
+check('页面有录音入口', phonePage.includes('录一段话'), true)
+check('页面有上传地址', phonePage.includes('/dsh-reminder-notify/mobile/upload'), true)
+try {
+  fs.unlinkSync(inside)
+} catch {}
+try {
+  fs.unlinkSync(outside)
+} catch {}
+try {
+  fs.rmdirSync(uploadRoot)
+} catch {}
+
 try {
   fs.unlinkSync(phoneHistory)
 } catch {}

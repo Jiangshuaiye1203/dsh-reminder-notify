@@ -387,6 +387,7 @@ const EXPORT_ROUTE = '/dsh-reminder-notify/export'
       historyActionReplied: '卡片回话',
       historyActionCustom: '点了自定义按钮',
       historyReplyPrefix: '回复：',
+      historyAttachPrefix: '附件 ',
       historyButtonPrefix: '按钮：',
       snoozeMinutesHint: '点「稍后提醒」后隔多久再弹一次。',
       queueEnabledHint: '关掉后多条提醒会同时叠在屏幕上。',
@@ -601,6 +602,7 @@ const EXPORT_ROUTE = '/dsh-reminder-notify/export'
       historyActionReplied: 'replied',
       historyActionCustom: 'custom button',
       historyReplyPrefix: 'reply: ',
+      historyAttachPrefix: 'files ',
       historyButtonPrefix: 'button: ',
       snoozeMinutesHint: 'How long to wait before the snoozed reminder pops again.',
       queueEnabledHint: 'Off means several reminders stack on screen at once.',
@@ -1525,6 +1527,7 @@ const EXPORT_ROUTE = '/dsh-reminder-notify/export'
         if (entry.count > 1) head.push('×' + entry.count)
         if (String(entry.reply || '') !== '') head.push(label('historyReplyPrefix') + String(entry.reply).slice(0, 40))
         if (String(entry.button || '') !== '') head.push(label('historyButtonPrefix') + String(entry.button).slice(0, 16))
+        if (Array.isArray(entry.attachments) && entry.attachments.length > 0) head.push(label('historyAttachPrefix') + entry.attachments.length)
         const text = String(entry.message || '').replace(/\s+/g, ' ').slice(0, 46)
         if (text !== '') head.push(text)
         return head.filter(Boolean).join(' · ')

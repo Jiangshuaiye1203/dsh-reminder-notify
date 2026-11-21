@@ -32,6 +32,14 @@ dsh plugin --profile desktop add link:<本目录绝对路径>
 
 - **手机页面能装到桌面了**：手机浏览器打开面板里那个地址，页面顶部会出现「安装到桌面」按钮（iOS 用 Safari 的「添加到主屏幕」），装完像个小 App 一样有图标、全屏打开，离线时也能看见上次的内容。
 - **手机回话会自己跑到模型眼前**：你在手机上回一句话，下一次模型开始干活时，提示词里会带上「用户刚从手机上回了话」和原文，不用你再复制一次；`GET /dsh-reminder-notify/mobile/inbox` 能看还有几条没被读走，`POST` 一下记成已读。
+## 0.23 起多了什么
+
+- **手机回话可以带图片和语音**：手机页底部有「拍照 / 选图」「录一段话」「选音频」三个入口，最多 3 个附件、单个 12MB；
+  文件存在本机 `~/.dsh/dsh-reminder-notify/uploads/`，不进公网。
+- 带附件的回话进历史时记成 `附件 N`，提示词里写成「手机回话：…（附 2 个：a.png、b.webm）」，模型能看到文件名并自己去读。
+- 上传走 `POST /dsh-reminder-notify/mobile/upload?t=<口令>`（body 是原始文件字节，`content-type` 决定扩展名；
+  支持 jpg/png/webp/gif/wav/mp3/m4a/ogg/webm）。
+
 
 ## 0.21 起多了什么
 

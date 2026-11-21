@@ -21,3 +21,4 @@
 - 0.22 新增：手机页面可「安装到桌面」（PWA：图标 + 全屏 + 离线缓存）；手机回话会自动出现在模型下一步的提示词里（读走即标记已读，`GET/POST /dsh-reminder-notify/mobile/inbox` 可查看与清空未读）。
 
 - 0.22.1 修正：手机页在内网 http 地址上不再假装能「安装到桌面」——http 给「添加到主屏幕」的手动说明（iPhone Safari 分享菜单 / Android Chrome 菜单），service worker 与离线缓存只在 https 或 localhost 下启用。
+- 0.23 新增：手机回话可以带 1–3 个图片或语音（存在本机 `~/.dsh/dsh-reminder-notify/uploads/`），历史里显示「附件 N」，提示词里会带文件名。
