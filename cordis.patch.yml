@@ -94,6 +94,8 @@
         pushDecide: true
         # 日报同时推到手机
         pushDigest: true
-    pushChat: ""
-    maxHoldSeconds: 0
+        # telegram 用的 chat_id（其它格式留空）
+        pushChat: ''
+        # 单卡最长停留秒数（0 = 不额外限制）
+        maxHoldSeconds: 0
         retryHostOnce: true
