@@ -22,6 +22,7 @@ window.__ModuleLoader__.load({
     const BALANCE_ROUTE = '/dsh-reminder-notify/balance'
     // 0.11 新增：提醒历史（GET 拿统计+最近记录，POST { mode: 'clear' } 清空）。
     const HISTORY_ROUTE = '/dsh-reminder-notify/history'
+    const DOCTOR_ROUTE = '/dsh-reminder-notify/doctor'
     const DIGEST_ROUTE = '/dsh-reminder-notify/digest'
     // 下拉按扩展名分组：wav 一组、mp3 一组……组内按文件名排序，一眼能看出格式。
     function groupAudioFiles(files) {
@@ -263,6 +264,32 @@ window.__ModuleLoader__.load({
       tryShown: '已经弹出一张样卡，20 秒后自动关闭。',
       tryQuiet: '现在在免打扰时段，样卡被拦住了（正常行为）。',
       tryFailed: '没能弹出示意卡：',
+      retryHostOnce: '宿主失败时重试一次',
+      retryHostOnceHint: '第一次没画出卡片（比如被系统策略拦下）时，静音再弹一次。',
+      groupDoctor: '工程与可靠性：自检',
+      doctorHint: '「运行自检」逐条检查宿主路径、提示音、历史可写与各项服务；「弹样卡」会真的弹一张，验证宿主能不能画。',
+      doctorNotRun: '还没运行过自检。',
+      doctorRun: '运行自检',
+      doctorRunning: '检查中…',
+      doctorAllOk: '全部通过。',
+      doctorHasFailures: '有项目没通过，见下面的 ✗。',
+      doctorProbe: '弹样卡',
+      doctorProbeOk: '样卡已弹出，能看到就说明宿主正常。',
+      doctorProbeFailed: '自检失败：',
+      doctorLastExit: '最近退出码',
+      doctorFailures: '最近失败次数',
+      check_platform: '系统',
+      check_powershell: 'PowerShell',
+      check_host_script: '宿主脚本',
+      check_audio_dir: '提示音目录',
+      check_audio_files: '提示音文件',
+      check_history_writable: '历史文件可写',
+      check_routes: '面板路由',
+      check_tools: 'notify_user',
+      check_config_editor: '配置可写',
+      check_account: '余额接口',
+      check_service_api: '宿主服务',
+      check_host_exit: '宿主退出码',
       speakEnabled: '朗读提醒内容',
       buttonsEnabled: '卡片显示按钮',
       snoozeMinutes: '「稍后提醒」延后分钟',
@@ -373,6 +400,32 @@ window.__ModuleLoader__.load({
       tryShown: 'A sample card is on screen; it closes itself in 20 seconds.',
       tryQuiet: 'Quiet hours are active, so the sample was held back (expected).',
       tryFailed: 'Could not show the sample: ',
+      retryHostOnce: 'Retry once when the host fails',
+      retryHostOnceHint: 'If the first card never drew (blocked by policy, for example), try once more with sound off.',
+      groupDoctor: 'Reliability: self-check',
+      doctorHint: 'Run the self-check to verify the host path, audio files, writable history and every service; "probe" pops a real card to prove the host can draw.',
+      doctorNotRun: 'The self-check has not run yet.',
+      doctorRun: 'Run self-check',
+      doctorRunning: 'Checking…',
+      doctorAllOk: 'Everything passed.',
+      doctorHasFailures: 'Some checks failed — see the ✗ lines below.',
+      doctorProbe: 'Probe a card',
+      doctorProbeOk: 'A probe card is on screen; if you can see it, the host is fine.',
+      doctorProbeFailed: 'Self-check failed: ',
+      doctorLastExit: 'last exit code',
+      doctorFailures: 'recent failures',
+      check_platform: 'platform',
+      check_powershell: 'PowerShell',
+      check_host_script: 'host script',
+      check_audio_dir: 'audio directory',
+      check_audio_files: 'audio files',
+      check_history_writable: 'history file writable',
+      check_routes: 'panel routes',
+      check_tools: 'notify_user',
+      check_config_editor: 'config writable',
+      check_account: 'balance API',
+      check_service_api: 'host service API',
+      check_host_exit: 'host exit code',
       speakEnabled: 'Speak the reminder',
       buttonsEnabled: 'Show card buttons',
       snoozeMinutes: 'Snooze minutes',
@@ -513,6 +566,7 @@ window.__ModuleLoader__.load({
       { key: 'position', group: 'basic', kind: 'select', options: ['br', 'center', 'tr'], optionLabels: ['positionBr', 'positionCenter', 'positionTr'] },
       { key: 'sound', group: 'basic', kind: 'boolean' },
       { key: 'cooldownMs', group: 'host', kind: 'number' },
+      { key: 'retryHostOnce', group: 'host', kind: 'boolean' },
       { key: 'doneAudio', group: 'audio', kind: 'text' },
       { key: 'decideAudio', group: 'audio', kind: 'text' },
       { key: 'rawAudio', group: 'audio', kind: 'text' },
@@ -575,6 +629,7 @@ window.__ModuleLoader__.load({
       seconds: 'secondsHint',
       sound: 'soundHint',
       cooldownMs: 'cooldownHint',
+      retryHostOnce: 'retryHostOnceHint',
       doneAudio: 'audioHint',
       audioDir: 'audioDirHint',
       cardBackground: 'cardBackgroundHint',
@@ -635,6 +690,7 @@ window.__ModuleLoader__.load({
       { id: 'queue', label: 'groupQueue', groups: ['queue'] },
       { id: 'misc', label: 'groupAdvanced', groups: ['digest', 'history', 'balance', 'host'] },
       { id: 'help', label: 'groupHelp', groups: [] },
+      { id: 'doctor', label: 'groupDoctor', groups: [] },
     ]
 
     // 0.14：说明收进面板里，按条目折叠。
@@ -676,6 +732,8 @@ window.__ModuleLoader__.load({
       const [openBlocks, setOpenBlocks] = React.useState({})
       const [tryBusy, setTryBusy] = React.useState(null)
       const [helpOpen, setHelpOpen] = React.useState({})
+      const [doctor, setDoctor] = React.useState(null)
+      const [doctorBusy, setDoctorBusy] = React.useState(false)
 
       React.useEffect(() => {
         if (typeof fetch !== 'function') {
@@ -878,6 +936,52 @@ window.__ModuleLoader__.load({
           })
       }
 
+      // 0.16 自检：把宿主路径、提示音、历史可写、各项服务逐条查一遍；顺带能弹一张样卡验证宿主。
+      function runDoctor(mode) {
+        if (doctorBusy) return
+        setDoctorBusy(true)
+        setMessage(null)
+        Promise.resolve()
+          .then(() => {
+            const init = mode === 'probe'
+              ? {
+                  method: 'POST',
+                  headers: { 'content-type': 'application/json', accept: 'application/json' },
+                  body: JSON.stringify({ mode: 'probe' }),
+                }
+              : { headers: { accept: 'application/json' } }
+            return fetch(DOCTOR_ROUTE, init)
+          })
+          .then((response) => {
+            const status = response ? response.status : 0
+            const body = response && typeof response.json === 'function' ? response.json() : Promise.resolve(null)
+            return Promise.resolve(body)
+              .catch(() => null)
+              .then((data) => {
+                if (response && response.ok && data && data.ok !== false) return data
+                const detail = data && data.error ? data.error : 'HTTP ' + status
+                throw new Error(detail)
+              })
+          })
+          .then((data) => {
+            setDoctorBusy(false)
+            if (data && data.report) setDoctor(data.report)
+            const label = typeof t === 'function' ? t : (key) => key
+            if (mode === 'probe') {
+              const card = data && data.card ? data.card : {}
+              if (card.ok === false) {
+                setMessage({ ok: false, text: label('doctorProbeFailed') + String(card.detail || card.error || '') })
+                return
+              }
+              setMessage({ ok: true, text: label('doctorProbeOk') })
+            }
+          })
+          .catch((error) => {
+            setDoctorBusy(false)
+            const prefix = typeof t === 'function' ? t('doctorProbeFailed') : 'self-check failed: '
+            setMessage({ ok: false, text: prefix + String((error && error.message) || error) })
+          })
+      }
       // 0.13「试试看」：让宿主真的弹一张样卡（POST /preview，mode=card），
       // 比读说明书更快知道每一档长什么样。样卡只停 20 秒，不改任何配置。
       function tryCard(kind) {
@@ -1367,7 +1471,44 @@ window.__ModuleLoader__.load({
 
       const advanced = ADV_BLOCKS.map((block) => {
         const open = openBlocks[block.id] === true
-        const children = block.id === 'help'
+        const children = block.id === 'doctor'
+          ? [
+              h(
+                'div',
+                { className: 'drn-help', key: 'doctor-panel' },
+                h('div', { className: 'drn-head-intro' }, label('doctorHint')),
+                doctor === null
+                  ? h('div', { className: 'drn-hint' }, label('doctorNotRun'))
+                  : h(
+                      'div',
+                      { className: 'drn-help' },
+                      h('div', { className: 'drn-hint' }, doctor.ok === true ? label('doctorAllOk') : label('doctorHasFailures')),
+                      (doctor.checks || []).map((check, index) =>
+                        h(
+                          'div',
+                          { className: 'drn-hint', key: 'check-' + index },
+                          (check.ok ? '✓ ' : '✗ ') + label('check_' + String(check.id || '').replace(/-/g, '_')) + ' · ' + String(check.detail || ''),
+                        ),
+                      ),
+                      h('div', { className: 'drn-hint' }, label('doctorLastExit') + ' ' + String(doctor.host && doctor.host.lastExit === null ? '—' : doctor.host && doctor.host.lastExit) + ' · ' + label('doctorFailures') + ' ' + String(doctor.host ? doctor.host.failureCount : 0)),
+                    ),
+                h(
+                  'div',
+                  { className: 'drn-pick' },
+                  h(
+                    'button',
+                    { type: 'button', className: 'drn-btn drn-digest-btn', disabled: doctorBusy, onClick: () => runDoctor('check') },
+                    label(doctorBusy ? 'doctorRunning' : 'doctorRun'),
+                  ),
+                  h(
+                    'button',
+                    { type: 'button', className: 'drn-btn drn-digest-btn', disabled: doctorBusy, onClick: () => runDoctor('probe') },
+                    label('doctorProbe'),
+                  ),
+                ),
+              ),
+            ]
+          : block.id === 'help'
           ? [
               h(
                 'div',

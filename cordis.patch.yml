@@ -94,3 +94,4 @@
         pushDecide: true
         # 日报同时推到手机
         pushDigest: true
+        retryHostOnce: true

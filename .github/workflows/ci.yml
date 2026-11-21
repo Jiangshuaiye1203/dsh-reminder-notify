@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  check:
+    name: check (${{ matrix.os }}, node ${{ matrix.node }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        node: ['20', '22']
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+
+      - name: Syntax check
+        run: |
+          node --check index.js
+          node --check client.js
+          node --check selftest.mjs
+
+      - name: Logic tests (no window, no files under test)
+        run: node tests/selftest-logic.mjs
+
+      - name: Settings panel tests (React stub)
+        run: node tests/selftest-client.mjs
+
+  # 真弹卡片的自检只在本机跑：GitHub 的 Windows runner 没有交互桌面，
+  # WinForms 窗口画不出来，跑它只会得到假失败。

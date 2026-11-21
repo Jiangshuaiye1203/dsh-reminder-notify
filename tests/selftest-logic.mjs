@@ -1,6 +1,6 @@
 // 纯逻辑自检：不弹窗口、不碰文件，只验证免打扰时段计算和历史统计。
 // 跑法：node tests/selftest-logic.mjs
-import { digestDue, digestMessage, historyStats, inQuietHours, parseClock, pushPayload, quietEndAt, todayKey } from '../index.js'
+import { digestDue, digestMessage, doctorReport, historyStats, inQuietHours, parseClock, pushPayload, quietEndAt, todayKey } from '../index.js'
 
 let failed = 0
 function check(label, actual, expected) {
@@ -84,6 +84,16 @@ check('日报第二行处理方式', text.split('\n')[1].includes('点知道了 
 check('日报带余额与基线', text.split('\n')[2], 'DeepSeek 余额 ¥42.50（基线 ¥100.00）')
 check('空历史也有一行', digestMessage({}, [], null), '今天还没有弹过提醒。')
 check('没余额就不加那行', digestMessage({}, digestEntries, null).split('\n').length, 2)
+
+// —— 0.16 自诊断（doctor）——
+{
+  const report = doctorReport({ get: () => undefined }, () => ({}))
+  check('doctor 有足够检查项', report.checks.length >= 8, true)
+  check('doctor 结构完整', ['ok', 'version', 'checks', 'host', 'paths'].every((key) => key in report), true)
+  check('doctor 平台检查为真', report.checks.find((item) => item.id === 'platform').ok, true)
+  check('doctor 每项都有 id/ok/detail', report.checks.every((item) => typeof item.id === 'string' && typeof item.ok === 'boolean' && typeof item.detail === 'string'), true)
+  check('doctor 没服务时也能给出结论', typeof report.ok, 'boolean')
+}
 
 // —— 推送报文（0.12） ——
 const wecom = JSON.parse(pushPayload({ pushFormat: 'wecom' }, 'T', 'M').body)

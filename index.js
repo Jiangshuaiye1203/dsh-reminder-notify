@@ -101,6 +101,7 @@ export const Config = z === null ? undefined : z.object({
   pushFormat: z.union(['wecom', 'serverchan', 'json', 'text']).default('wecom').description('推送格式：wecom 企业微信机器人、serverchan Server酱、json 通用 JSON、text 纯文本').volatile(),
   pushDecide: z.boolean().default(true).description('「需要你来决定」档位也推到手机').volatile(),
   pushDigest: z.boolean().default(true).description('日报同时推到手机').volatile(),
+  retryHostOnce: z.boolean().default(true).description('宿主第一次没画出卡片时，自动静音重试一次').volatile(),
   dryRun: z.boolean().default(false).description('调试用：只试算参数、不真的弹窗（自检脚本会打开它）').volatile(),
 })
 
@@ -241,6 +242,7 @@ function settingsOf(config) {
     pushFormat: ['wecom', 'serverchan', 'json', 'text'].includes(c.pushFormat) ? c.pushFormat : 'wecom',
     pushDecide: c.pushDecide !== false,
     pushDigest: c.pushDigest !== false,
+    retryHostOnce: c.retryHostOnce !== false,
     dryRun: c.dryRun === true,
   }
 }
@@ -523,11 +525,14 @@ async function showItem(item) {
     queueLeft,
   })
   let action = 'unknown'
+  let exitCode = null
+  let hostError
   try {
     const { exited } = await launch(settings.powershellPath, argv, PACKAGE_ROOT)
-    await exited
-  } catch {
+    exitCode = await exited
+  } catch (error) {
     // spawn 失败就当作没弹出来，记录一条便于排查
+    hostError = String(error?.message ?? error)
   }
   try {
     const parsed = JSON.parse(fs.readFileSync(resultFile, 'utf8'))
@@ -545,12 +550,30 @@ async function showItem(item) {
   } catch {
     // 没有结果文件（比如宿主被杀）时按 unknown 记
   }
+  // 0.16：宿主明明该写结果却没写（或非零退出）就记一次 host-failed，并在下面自动重试一次。
+  if (hostError !== undefined) {
+    action = 'host-failed'
+    noteHostRun(exitCode, action, hostError)
+  } else if (action === 'unknown' && exitCode !== null && exitCode !== 0) {
+    action = 'host-failed'
+    noteHostRun(exitCode, action, 'host exited before writing a result')
+  } else {
+    noteHostRun(exitCode, action)
+  }
   try {
     fs.unlinkSync(resultFile)
   } catch {
     // 清不掉就算了，文件名带 pid + 时间戳不会互相覆盖
   }
   item.action = action
+  if (action === 'host-failed' && settings.retryHostOnce && item.retried !== true) {
+    // 兜底：静音重试一次（宿主偶发被系统策略拦下时，第二次通常能画出来）。
+    const retry = setTimeout(() => {
+      queue.unshift({ ...item, retried: true, count: item.count ?? 1, holdUntil: 0, createdAt: Date.now() })
+      pump()
+    }, 800)
+    if (typeof retry.unref === 'function') retry.unref()
+  }
   appendHistory(settings, {
     at: Date.now(),
     kind: item.kind,
@@ -1532,6 +1555,168 @@ function registerDigestRoute(ctx, getSettings) {
   }, 'dsh-reminder-notify: digest route')
 }
 
+/** 宿主健康：最近一次退出码 / 结果 / 失败原因，供自诊断面板与 doctor 路由读取。 */
+const hostHealth = { lastExit: null, lastAction: null, lastAt: 0, lastError: '', failures: [] }
+
+function noteHostRun(exitCode, action, error) {
+  hostHealth.lastExit = exitCode
+  hostHealth.lastAction = action
+  hostHealth.lastAt = Date.now()
+  hostHealth.lastError = error === undefined ? '' : String(error)
+  if (error !== undefined || action === 'host-failed') {
+    hostHealth.failures.push({
+      at: hostHealth.lastAt,
+      exit: exitCode,
+      action,
+      error: hostHealth.lastError,
+    })
+    if (hostHealth.failures.length > 10) hostHealth.failures.shift()
+  }
+}
+
+/** 在 PATH 里找一个可执行文件（Windows 上补 .exe），找不到返回 null。 */
+function resolveOnPath(name) {
+  if (typeof name !== 'string' || name.trim() === '') return null
+  const exts = process.platform === 'win32' ? ['', '.exe', '.cmd', '.bat'] : ['']
+  const dirs = String(process.env.PATH ?? '').split(path.delimiter).filter((dir) => dir !== '')
+  for (const dir of dirs) {
+    for (const ext of exts) {
+      const candidate = path.join(dir, name + ext)
+      try {
+        if (fs.existsSync(candidate)) return candidate
+      } catch {
+        // 无权访问的目录跳过
+      }
+    }
+  }
+  return null
+}
+
+/**
+ * 0.16 自诊断：把「要什么、在哪、通不通」逐条列出来。
+ * 只读，不弹卡、不改配置；面板的「运行自检」和 doctor 路由都用它。
+ */
+export function doctorReport(ctx, getSettings) {
+  const settings = getSettings()
+  const checks = []
+  const add = (id, ok, detail) => checks.push({ id, ok: ok === true, detail: String(detail ?? '') })
+
+  add('platform', process.platform === 'win32', process.platform)
+
+  const psName = str(settings.powershellPath, 'powershell.exe')
+  const looksLikePath = psName.includes('/') || psName.includes('\\')
+  const psPath = looksLikePath ? path.resolve(psName) : resolveOnPath(psName)
+  add('powershell', psPath !== null && psPath !== undefined && fs.existsSync(psPath), psPath ?? `找不到 ${psName}`)
+
+  const scriptPath = path.resolve(str(settings.scriptPath, BUNDLED_HOST_SCRIPT))
+  add('host-script', fs.existsSync(scriptPath), scriptPath)
+
+  const audioDir = path.resolve(str(settings.audioDir, BUNDLED_AUDIO_DIR))
+  const doneAudio = str(settings.doneAudio, '')
+  const decideAudio = str(settings.decideAudio, '')
+  const audioOk = fs.existsSync(audioDir)
+  add('audio-dir', audioOk, audioDir)
+  if (audioOk) {
+    const missing = [doneAudio, decideAudio]
+      .filter((file) => file !== '')
+      .filter((file) => !fs.existsSync(path.join(audioDir, file)))
+    add('audio-files', missing.length === 0, missing.length === 0 ? '两个提示音都在' : '缺少 ' + missing.join('、'))
+  }
+
+  // 调用方可能只给半份 settings（自检、别的插件），这里兜一层，别让诊断自己崩。
+  let histFile = ''
+  try {
+    histFile = historyPathOf(settings)
+  } catch {
+    histFile = path.join(os.homedir(), '.dsh', 'dsh-reminder-notify', 'history.json')
+  }
+  let writable = false
+  try {
+    fs.mkdirSync(path.dirname(histFile), { recursive: true })
+    fs.accessSync(path.dirname(histFile), fs.constants.W_OK)
+    writable = true
+  } catch {
+    writable = false
+  }
+  add('history-writable', writable, histFile)
+
+  const service = (name) => (typeof ctx.get === 'function' ? ctx.get(name) : undefined)
+  const web = service('webServer')
+  add('routes', web !== undefined && web !== null && typeof web.register === 'function', web === undefined ? 'webServer 不可用' : 'webServer 可用')
+  const tools = service('tools')
+  add('tools', tools !== undefined && tools !== null && typeof tools.register === 'function', tools === undefined ? 'tools 不可用' : 'notify_user 可注册')
+  add('config-editor', service('configEditor') !== undefined, service('configEditor') === undefined ? '面板只能读（旧宿主）' : '可写')
+  add('account', service('deepseekAccount') !== undefined, service('deepseekAccount') === undefined ? '读不到余额（不影响卡片）' : '可读余额')
+  add('service-api', typeof ctx.provide === 'function', typeof ctx.provide === 'function' ? "可 provide('reminder')" : '旧宿主没有 ctx.provide')
+
+  const lastExit = hostHealth.lastExit
+  const hostOk = lastExit === null || lastExit === 0
+  add('host-exit', hostOk, lastExit === null ? '还没有弹过卡片' : `最近一次退出码 ${lastExit}`)
+
+  return {
+    ok: checks.every((check) => check.ok),
+    version: packageVersion(),
+    platform: process.platform,
+    node: process.version,
+    paths: { powershell: psPath ?? null, hostScript: scriptPath, audioDir, history: histFile },
+    host: {
+      lastExit: hostHealth.lastExit,
+      lastAction: hostHealth.lastAction,
+      lastAt: hostHealth.lastAt,
+      lastError: hostHealth.lastError,
+      failureCount: hostHealth.failures.length,
+      failures: hostHealth.failures.slice(-5),
+    },
+    checks,
+  }
+}
+
+const DOCTOR_ROUTE = '/dsh-reminder-notify/doctor'
+
+function registerDoctorRoute(ctx, getSettings) {
+  const web = typeof ctx.get === 'function' ? ctx.get('webServer') : undefined
+  if (web === undefined || web === null || typeof web.register !== 'function') {
+    ctx.logger?.warn?.('dsh-reminder-notify: webServer is unavailable, the doctor panel stays hidden')
+    return
+  }
+  const reply = (res, status, payload) => {
+    res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+    res.end(JSON.stringify(payload))
+  }
+  const route = {
+    kind: 'exact',
+    path: DOCTOR_ROUTE,
+    handler: async (req, res) => {
+      try {
+        const settings = getSettings()
+        const method = (req.method ?? 'GET').toUpperCase()
+        if (method === 'GET') return reply(res, 200, { ok: true, report: doctorReport(ctx, getSettings) })
+        if (method !== 'POST') return reply(res, 405, { ok: false, error: 'use GET or POST' })
+        const body = await readJsonBody(req)
+        const mode = body !== null && typeof body === 'object' ? str(body.mode, 'check') : 'check'
+        if (mode === 'check') return reply(res, 200, { ok: true, report: doctorReport(ctx, getSettings) })
+        if (mode === 'probe') {
+          const card = await notify(
+            'raw',
+            { title: '自检样卡', message: '这张卡由「运行自检」弹出，能看到就说明宿主正常。', seconds: 12 },
+            { ...settings, quietEnabled: false },
+          )
+          return reply(res, 200, { ok: true, mode: 'probe', card })
+        }
+        return reply(res, 400, { ok: false, error: 'unknown mode' })
+      } catch (error) {
+        return reply(res, 500, { ok: false, error: String(error?.message ?? error) })
+      }
+    },
+  }
+  ctx.effect(() => {
+    const dispose = web.register(route)
+    return () => {
+      if (typeof dispose === 'function') dispose()
+    }
+  }, 'dsh-reminder-notify: doctor route')
+}
+
 function registerHistoryRoute(ctx, getSettings) {
   const web = typeof ctx.get === 'function' ? ctx.get('webServer') : undefined
   if (web === undefined || web === null || typeof web.register !== 'function') {
@@ -1628,6 +1813,7 @@ export function apply(ctx, config) {
   registerHistoryRoute(ctx, () => settingsOf(config))
   registerDigestRoute(ctx, () => settingsOf(config))
   registerDigestLoop(ctx, () => settingsOf(config))
+  registerDoctorRoute(ctx, () => settingsOf(config))
   const tools = typeof ctx.get === 'function' ? ctx.get('tools') : ctx.tools
   if (tools === undefined || tools === null || typeof tools.register !== 'function') {
     ctx.logger?.warn?.('dsh-reminder-notify: tools service is unavailable, notify_user was not registered')
