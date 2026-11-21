@@ -23,6 +23,7 @@ window.__ModuleLoader__.load({
     // 0.11 新增：提醒历史（GET 拿统计+最近记录，POST { mode: 'clear' } 清空）。
     const HISTORY_ROUTE = '/dsh-reminder-notify/history'
     const RECUR_ROUTE = '/dsh-reminder-notify/recurring'
+    const MOBILE_LINK_ROUTE = '/dsh-reminder-notify/mobile/link'
     const DOCTOR_ROUTE = '/dsh-reminder-notify/doctor'
     const TRAY_ROUTE = '/dsh-reminder-notify/tray'
 const EXPORT_ROUTE = '/dsh-reminder-notify/export'
@@ -440,6 +441,13 @@ const EXPORT_ROUTE = '/dsh-reminder-notify/export'
       recurringNext: '下次',
       recurringHint: '到点自动弹卡；times 用完就自动消失。取消只看最近一条。',
       recurringRefresh: '刷新',
+      mobileTitle: '手机页面（同一 Wi-Fi）',
+      mobileHint: '手机连同一个 Wi-Fi，打开这个地址就能看最近的提醒并回一句话；地址里的 t= 是口令，别外传。',
+      mobileRefresh: '刷新地址',
+      mobileCopy: '复制地址',
+      mobileLoading: '正在取地址…',
+      mobileUnavailable: '还没取到地址，点「刷新地址」试试。',
+      mobileCopied: '手机地址已复制',
       recurringCancel: '取消最近一条',
       groupHelp: '使用说明（点开才看）',
       helpIntro: '下面每条点开才看，平时不占地方。',
@@ -647,6 +655,13 @@ const EXPORT_ROUTE = '/dsh-reminder-notify/export'
       recurringNext: 'next',
       recurringHint: 'Each one fires on schedule and disappears after its times limit. Cancel removes the newest one.',
       recurringRefresh: 'Refresh',
+      mobileTitle: 'Phone page (same Wi-Fi)',
+      mobileHint: 'Open this URL on a phone in the same Wi-Fi to see recent reminders and reply. The t= value is the access token.',
+      mobileRefresh: 'Refresh URL',
+      mobileCopy: 'Copy URL',
+      mobileLoading: 'Loading URL…',
+      mobileUnavailable: 'No URL yet; click Refresh URL.',
+      mobileCopied: 'Phone URL copied',
       recurringCancel: 'Cancel newest',
       groupHelp: 'How it works (expand to read)',
       helpIntro: 'Each topic stays folded until you open it.',
@@ -913,6 +928,8 @@ const EXPORT_ROUTE = '/dsh-reminder-notify/export'
       const [historyBusy, setHistoryBusy] = React.useState(false)
       const [recurring, setRecurring] = React.useState(null)
       const [recurringBusy, setRecurringBusy] = React.useState(false)
+      const [mobile, setMobile] = React.useState(null)
+      const [mobileBusy, setMobileBusy] = React.useState(false)
       const [digest, setDigest] = React.useState(null)
       const [digestBusy, setDigestBusy] = React.useState(false)
       // 0.13：折叠块的展开状态（默认全收起）与「试试看」的忙碌标记。
@@ -983,6 +1000,7 @@ const EXPORT_ROUTE = '/dsh-reminder-notify/export'
         refreshBalance()
         refreshHistory()
         refreshRecurring()
+        refreshMobile()
         refreshTray()
         refreshDigest()
       }, [])
@@ -1384,6 +1402,26 @@ const EXPORT_ROUTE = '/dsh-reminder-notify/export'
         return String(digest.message || '').split('\n').join(' / ')
       }
 
+      function refreshMobile() {
+        setMobileBusy(true)
+        fetch(MOBILE_LINK_ROUTE, { headers: { accept: 'application/json' } })
+          .then((res) => res.json())
+          .then((data) => setMobile(data && data.ok ? data : { ok: false }))
+          .catch(() => setMobile({ ok: false }))
+          .then(() => setMobileBusy(false))
+      }
+
+      function copyMobile() {
+        if (!mobile || !mobile.url) return
+        const label = typeof t === 'function' ? t : (key) => key
+        try {
+          navigator.clipboard.writeText(mobile.url)
+          setMessage({ ok: true, text: label('mobileCopied') })
+        } catch {
+          setMessage({ ok: true, text: mobile.url })
+        }
+      }
+
       function recurringFetch(options) {
         setRecurringBusy(true)
         return fetch(RECUR_ROUTE, options)
@@ -1698,6 +1736,40 @@ const EXPORT_ROUTE = '/dsh-reminder-notify/export'
                       label('recurringCancel'),
                     ),
                   ),
+            ),
+          )
+          const mobileUrl = mobile && mobile.ok === true && mobile.url ? mobile.url : ''
+          rows.push(
+            h(
+              'div',
+              { className: 'drn-row', key: 'mobile-link' },
+              h(
+                'div',
+                { className: 'drn-row-main' },
+                h('div', { className: 'drn-label' }, label('mobileTitle')),
+                h(
+                  'div',
+                  { className: 'drn-hint' },
+                  mobileUrl === '' ? label(mobileBusy ? 'mobileLoading' : 'mobileUnavailable') : mobileUrl,
+                ),
+                h('div', { className: 'drn-hint' }, label('mobileHint')),
+              ),
+              h(
+                'div',
+                { className: 'drn-pick' },
+                h(
+                  'button',
+                  { type: 'button', className: 'drn-btn drn-digest-btn', disabled: mobileBusy, onClick: refreshMobile },
+                  label('mobileRefresh'),
+                ),
+                mobileUrl === ''
+                  ? null
+                  : h(
+                      'button',
+                      { type: 'button', className: 'drn-btn drn-digest-btn', disabled: mobileBusy, onClick: copyMobile },
+                      label('mobileCopy'),
+                    ),
+              ),
             ),
           )
           if (entries.length > 0) {

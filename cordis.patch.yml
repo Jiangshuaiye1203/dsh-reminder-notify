@@ -127,6 +127,7 @@
         recurringEnabled: true
         # 周期任务存档文件（留空 = 用户目录下 .dsh/dsh-reminder-notify/recurring.json）
         recurringFile: ''
+        mobileToken: ''
         # 卡片输入框回复（打完按 Enter 就把这句话回给模型）
         replyEnabled: true
         # 卡片上的自定义按钮：标签|网址，多条用分号隔开，最多 3 个

@@ -1,6 +1,6 @@
 // 纯逻辑自检：不弹窗口、不碰文件，只验证免打扰时段计算和历史统计。
 // 跑法：node tests/selftest-logic.mjs
-import { condStateAfter, customButtonsOf, customButtonsSpec, repliesOf, digestDue, digestMessage, doctorReport, evaluateConditions, historyStats, inQuietHours, nextRunAfter, parseClock, parseCustomButtons, parseEvery, pushPayload, quietEndAt, todayKey, toastArgsOf } from '../index.js'
+import { condStateAfter, customButtonsOf, customButtonsSpec, escapeHtml, mobileLinkOf, mobilePageOf, repliesOf, digestDue, digestMessage, doctorReport, evaluateConditions, historyStats, inQuietHours, nextRunAfter, parseClock, parseCustomButtons, parseEvery, pushPayload, quietEndAt, todayKey, toastArgsOf } from '../index.js'
 
 let failed = 0
 function check(label, actual, expected) {
@@ -187,6 +187,25 @@ check('customButtonsOf 两边都空', customButtonsOf({ customButtons: '' }, {})
 check('nextRunAfter 正常加一个周期', nextRunAfter(t0, 30, t0 + 60 * 1000), t0 + 30 * 60 * 1000)
 check('nextRunAfter 跳过错过很多个', nextRunAfter(t0, 30, t0 + 3 * 3600 * 1000), t0 + 210 * 60 * 1000)
 check('nextRunAfter 到点前不跳', nextRunAfter(t0, 60, t0 + 60 * 1000), t0 + 60 * 60 * 1000)
+
+// —— 手机端局域网页面（0.21）——
+check('escapeHtml 转义五个字符', escapeHtml('<b>&"\''), '&lt;b&gt;&amp;&quot;&#39;')
+const linkWithToken = mobileLinkOf({ mobileToken: 'abc123' }, '192.168.1.5:4517', { name: 'Wi-Fi', address: '192.168.1.5' })
+check('mobileLinkOf 带口令', linkWithToken.url, 'http://192.168.1.5:4517/dsh-reminder-notify/mobile?t=abc123')
+check('mobileLinkOf 端口取 Host', linkWithToken.port, '4517')
+const linkNoToken = mobileLinkOf({ mobileToken: '' }, '10.0.0.2:4517', { name: 'eth', address: '10.0.0.2' })
+check('mobileLinkOf 无口令不带查询串', linkNoToken.url, 'http://10.0.0.2:4517/dsh-reminder-notify/mobile')
+const sampleEntries = [
+  { at: Date.now(), kind: 'done', title: '<script>alert(1)</script>', message: '', action: 'ok' },
+  { at: Date.now(), kind: 'raw', title: '电话回话', message: '', action: 'replied', reply: '好的<b>' },
+]
+const page = mobilePageOf({ mobileToken: 'abc' }, sampleEntries, new Date(2026, 10, 21, 16, 30))
+check('mobilePageOf 有标题', page.includes('桌面提醒 · 手机版'), true)
+check('mobilePageOf 有回话入口', page.includes('/dsh-reminder-notify/mobile/reply'), true)
+check('mobilePageOf 转义正文', page.includes('&lt;script&gt;alert(1)&lt;/script&gt;'), true)
+check('mobilePageOf 不出原始 script 标签', page.includes('<script>alert(1)</script>'), false)
+check('mobilePageOf 显示回复', page.includes('回复：好的&lt;b&gt;'), true)
+check('mobilePageOf 统计今天条数', page.includes('<b>2</b><span>今天</span>'), true)
 
 if (failed > 0) {
   console.log(`\n${failed} 项失败`)

@@ -24,6 +24,13 @@ dsh plugin --profile desktop add link:<本目录绝对路径>
 - **周期提醒**：`notify_user(kind, message, every: "30m", times: 5)` 会登记一条周期任务（`30m` / `2h` / `1d`，1 分钟–7 天），到点自己弹卡；`times` 不传就一直重复。任务存在 `~/.dsh/dsh-reminder-notify/recurring.json`，`GET /dsh-reminder-notify/recurring` 能看列表，POST `{"action":"cancel","id":"…"}` 或 `{"action":"cancel-all"}` 可取消。
 - **历史图表**：面板「历史与统计」里多了一排 30 天柱状图（每天一根，鼠标停上去看日期和条数），一眼看出哪天提醒多。
 
+## 0.21 起多了什么
+
+- **手机页面（局域网）**：面板「高级：历史、余额与宿主」里会显示一个 `http://<内网IP>:<端口>/dsh-reminder-notify/mobile?t=…` 地址。
+  手机连同一个 Wi-Fi 打开它，就能看最近的提醒、点「发送」回一句话（回话会进历史、按 `pushReply` 推手机）。
+  地址里的 `t=` 是随机口令（存在配置 `mobileToken`，留空时第一次取地址自动生成），别外传；不走公网、不需要备案。
+- 想把口令换掉：把配置里的 `mobileToken` 清空，再点一次「刷新地址」即可重新生成。
+
 ## 0.20 起多了什么
 
 - **卡片上能回话**：`replyEnabled` 打开后卡上有输入框，打完按 Enter 就把这句话回给模型（`GET /dsh-reminder-notify/replies` 能取到最近 20 条，服务里也有 `replies()`）。

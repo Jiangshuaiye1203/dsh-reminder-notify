@@ -125,6 +125,7 @@ export const Config = z === null ? undefined : z.object({
   customButtons: z.string().default('').description('卡片上的自定义按钮：标签|网址，多条用分号隔开，最多 3 个').volatile(),
   focusAssistMute: z.boolean().default(true).description('Windows 专注助手 / 演示模式开着时自动静音').volatile(),
   pushReply: z.boolean().default(true).description('用户在卡片上回话时也推到手机').volatile(),
+  mobileToken: z.string().default('').description('手机页面（局域网）的访问口令，留空由插件自动生成').volatile(),
   dryRun: z.boolean().default(false).description('调试用：只试算参数、不真的弹窗（自检脚本会打开它）').volatile(),
 })
 
@@ -327,6 +328,7 @@ function settingsOf(config) {
     customButtons: str(c.customButtons, ''),
     focusAssistMute: c.focusAssistMute !== false,
     pushReply: c.pushReply !== false,
+    mobileToken: str(c.mobileToken, ''),
     dryRun: c.dryRun === true,
   }
 }
@@ -1137,6 +1139,7 @@ const PREVIEW_ROUTE = '/dsh-reminder-notify/preview'
 const BALANCE_ROUTE = '/dsh-reminder-notify/balance'
 const HISTORY_ROUTE = '/dsh-reminder-notify/history'
 const REPLIES_ROUTE = '/dsh-reminder-notify/replies'
+const MOBILE_ROUTE = '/dsh-reminder-notify/mobile'
 const EXPORT_ROUTE = '/dsh-reminder-notify/export'
 const DIGEST_ROUTE = '/dsh-reminder-notify/digest'
 const RECUR_ROUTE = '/dsh-reminder-notify/recurring'
@@ -2197,6 +2200,185 @@ export function repliesOf(settings, limit = 20) {
   return entries.slice(-size).reverse()
 }
 
+// 0.21：手机端局域网页面。手机和电脑在同一个 Wi-Fi 里，扫码/输地址就能看最近的提醒、回一句话。
+// 不做公网、不要备案：页面只挂在已有的 web 端口上，靠一个随机口令拦住外人。
+export function lanAddressOf(interfaces = os.networkInterfaces()) {
+  const list = []
+  for (const [name, addrs] of Object.entries(interfaces || {})) {
+    for (const info of addrs || []) {
+      const family = typeof info.family === 'string' ? info.family : info.family === 4 ? 'IPv4' : 'IPv6'
+      if (family !== 'IPv4' || info.internal === true) continue
+      list.push({ name, address: info.address })
+    }
+  }
+  return list.find((one) => /^192\.168\.|^10\.|^172\.(1[6-9]|2\d|3[01])\./.test(one.address)) || list[0] || null
+}
+
+export function escapeHtml(text) {
+  return String(text ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}
+
+/** 手机页地址：用请求里的 Host 拼，手机换成同一个局域网 IP 就能打开。 */
+export function mobileLinkOf(settings, host, lan = null) {
+  const token = str(settings.mobileToken, '')
+  const address = lan?.address ?? '127.0.0.1'
+  const port = /:\d+$/.test(String(host ?? '')) ? String(host).split(':').pop() : '4517'
+  const base = `http://${address}:${port}${MOBILE_ROUTE}`
+  return { url: token === '' ? base : `${base}?t=${encodeURIComponent(token)}`, address, port, token }
+}
+
+export function mobilePageOf(settings, entries, now = new Date()) {
+  const stats = historyStats(entries)
+  const recent = entries.slice(-12).reverse()
+  const kindText = { done: '完成', decide: '要你决定', raw: '普通' }
+  const actionText = {
+    ok: '知道了',
+    timeout: '自动关闭',
+    dismiss: '点了卡片',
+    snooze: '稍后提醒',
+    replied: '回话',
+    custom: '自定义按钮',
+    'quiet-skip': '免打扰跳过',
+  }
+  const rows = recent
+    .map((entry) => {
+      const time = new Date(entry.at ?? 0)
+      const hh = String(time.getHours()).padStart(2, '0')
+      const mm = String(time.getMinutes()).padStart(2, '0')
+      const reply = str(entry.reply, '') === '' ? '' : `<div class="reply">回复：${escapeHtml(entry.reply)}</div>`
+      return `<li><div class="meta"><span>${hh}:${mm}</span><span>${escapeHtml(kindText[entry.kind] ?? entry.kind)}</span><span>${escapeHtml(actionText[entry.action] ?? entry.action)}</span></div><div class="msg">${escapeHtml(entry.title)}</div>${reply}</li>`
+    })
+    .join('\n')
+  return `<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>桌面提醒 · 手机版</title>
+<style>
+:root { color-scheme: dark; }
+* { box-sizing: border-box; }
+body { margin: 0; padding: 16px 14px 40px; background: #14181f; color: #e6edf3; font: 15px/1.55 -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; }
+h1 { font-size: 17px; margin: 0 0 4px; }
+.sub { color: #8b98a8; font-size: 13px; margin-bottom: 16px; }
+.stats { display: flex; gap: 10px; margin-bottom: 16px; }
+.stat { flex: 1; background: #1b212b; border-radius: 10px; padding: 10px; text-align: center; }
+.stat b { display: block; font-size: 20px; }
+.stat span { color: #8b98a8; font-size: 12px; }
+ul { list-style: none; padding: 0; margin: 0 0 18px; }
+li { background: #1b212b; border-radius: 10px; padding: 10px 12px; margin-bottom: 8px; }
+.meta { display: flex; gap: 8px; color: #8b98a8; font-size: 12px; margin-bottom: 4px; }
+.msg { font-size: 14px; word-break: break-word; }
+.reply { margin-top: 4px; color: #7dd3a0; font-size: 13px; }
+form { display: flex; gap: 8px; position: sticky; bottom: 0; background: #14181f; padding-top: 8px; }
+input { flex: 1; padding: 11px 12px; border-radius: 10px; border: 1px solid #2b3442; background: #1b212b; color: #e6edf3; font-size: 15px; }
+button { padding: 11px 16px; border-radius: 10px; border: 0; background: #2f81f7; color: #fff; font-size: 15px; }
+#tip { color: #8b98a8; font-size: 12px; margin-top: 8px; min-height: 16px; }
+</style></head><body>
+<h1>桌面提醒 · 手机版</h1>
+<div class="sub">${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')} · 和电脑同一个 Wi-Fi 才能打开</div>
+<div class="stats">
+  <div class="stat"><b>${stats.today}</b><span>今天</span></div>
+  <div class="stat"><b>${stats.total}</b><span>总共</span></div>
+  <div class="stat"><b>${stats.byKind.decide ?? 0}</b><span>要你决定</span></div>
+</div>
+<ul>${rows === '' ? '<li><div class="msg">还没有提醒</div></li>' : rows}</ul>
+<form id="f"><input id="m" maxlength="300" placeholder="回一句话给电脑上的模型"><button type="submit">发送</button></form>
+<div id="tip"></div>
+<script>
+const f = document.getElementById('f'); const m = document.getElementById('m'); const tip = document.getElementById('tip');
+f.addEventListener('submit', async (e) => {
+  e.preventDefault(); const text = m.value.trim(); if (!text) return;
+  tip.textContent = '发送中…';
+  try {
+    const r = await fetch('${MOBILE_ROUTE}/reply' + location.search, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ message: text }) });
+    const data = await r.json();
+    if (data && data.ok) { tip.textContent = '已发送，电脑上的模型能看到'; m.value = ''; }
+    else { tip.textContent = '没发出去：' + ((data && data.error) || '未知原因'); }
+  } catch (err) { tip.textContent = '没发出去：' + err.message; }
+});
+</script></body></html>`
+}
+
+function registerMobileRoute(ctx, getSettings) {
+  const reply = (res, status, body, type = 'application/json; charset=utf-8') => {
+    res.writeHead(status, { 'content-type': type, 'cache-control': 'no-store' })
+    res.end(body)
+  }
+  const unauthorized = (res) => reply(res, 401, JSON.stringify({ ok: false, error: 'token-required' }))
+  const authorized = (settings, t) => {
+    const token = str(settings.mobileToken, '')
+    return token === '' || String(t ?? '') === token
+  }
+  const route = {
+    kind: 'exact',
+    path: MOBILE_ROUTE,
+    handler: async (req, res) => {
+      const settings = getSettings()
+      const url = new URL(req.url ?? MOBILE_ROUTE, 'http://127.0.0.1')
+      if (!authorized(settings, url.searchParams.get('t'))) return unauthorized(res)
+      if (req.method !== 'GET') return reply(res, 405, JSON.stringify({ ok: false, error: 'use GET' }))
+      const html = mobilePageOf(settings, readHistory(settings))
+      return reply(res, 200, html, 'text/html; charset=utf-8')
+    },
+  }
+  mountRoute(ctx, route, 'dsh-reminder-notify: mobile page')
+
+  const replyRoute = {
+    kind: 'exact',
+    path: `${MOBILE_ROUTE}/reply`,
+    handler: async (req, res) => {
+      const settings = getSettings()
+      const url = new URL(req.url ?? `${MOBILE_ROUTE}/reply`, 'http://127.0.0.1')
+      if (!authorized(settings, url.searchParams.get('t'))) return unauthorized(res)
+      if (req.method !== 'POST') return reply(res, 405, JSON.stringify({ ok: false, error: 'use POST' }))
+      const body = await readJsonBody(req)
+      const text = str(body?.message, '').trim().slice(0, 300)
+      if (text === '') return reply(res, 400, JSON.stringify({ ok: false, error: 'empty-message' }))
+      appendHistory(settings, {
+        at: Date.now(),
+        kind: 'raw',
+        title: '手机回话',
+        message: '',
+        action: 'replied',
+        count: 1,
+        snoozed: false,
+        quiet: false,
+        reply: text,
+        via: 'mobile',
+      })
+      emitServiceEvent('replied', { kind: 'raw', title: '手机回话', reply: text, via: 'mobile' })
+      if (settings.pushEnabled === true && settings.pushReply === true && settings.dryRun !== true) {
+        const pushed = pushOut(settings, '手机回话', text, { kind: 'reply', time: new Date().toISOString() })
+        if (pushed !== null && typeof pushed.catch === 'function') pushed.catch(() => {})
+      }
+      return reply(res, 200, JSON.stringify({ ok: true, replies: repliesOf(settings, 5).length }))
+    },
+  }
+  mountRoute(ctx, replyRoute, 'dsh-reminder-notify: mobile reply route')
+
+  const linkRoute = {
+    kind: 'exact',
+    path: `${MOBILE_ROUTE}/link`,
+    handler: async (req, res) => {
+      const settings = getSettings()
+      if (str(settings.mobileToken, '') === '') {
+        // 第一次要链接时生成口令并写回配置，之后固定不变
+        const token = Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 10)
+        await saveBalanceState(ctx, { mobileToken: token })
+        settings.mobileToken = token
+      }
+      const lan = lanAddressOf()
+      const link = mobileLinkOf(settings, req.headers?.host, lan)
+      return reply(res, 200, JSON.stringify({ ok: true, ...link, lan: lan?.address ?? null, iface: lan?.name ?? null }))
+    },
+  }
+  mountRoute(ctx, linkRoute, 'dsh-reminder-notify: mobile link route')
+}
+
 function registerRepliesRoute(ctx, getSettings) {
   const reply = (res, status, payload) => {
     res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
@@ -2739,6 +2921,7 @@ export function apply(ctx, config) {
   registerRecurringRoute(ctx, () => settingsOf(config))
   registerRecurringLoop(ctx, () => settingsOf(config))
   registerRepliesRoute(ctx, () => settingsOf(config))
+  registerMobileRoute(ctx, () => settingsOf(config))
   registerDoctorRoute(ctx, () => settingsOf(config))
   const tools = typeof ctx.get === 'function' ? ctx.get('tools') : ctx.tools
   if (tools === undefined || tools === null || typeof tools.register !== 'function') {
