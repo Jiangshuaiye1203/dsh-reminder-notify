@@ -29,6 +29,7 @@ window.__ModuleLoader__.load({
 const EXPORT_ROUTE = '/dsh-reminder-notify/export'
 const STATS_ROUTE = '/dsh-reminder-notify/stats'
 const FEEDBACK_ROUTE = '/dsh-reminder-notify/feedback'
+const BACKUP_ROUTE = '/dsh-reminder-notify/backup'
     const DIGEST_ROUTE = '/dsh-reminder-notify/digest'
     // 下拉按扩展名分组：wav 一组、mp3 一组……组内按文件名排序，一眼能看出格式。
     function groupAudioFiles(files) {
@@ -449,6 +450,19 @@ const FEEDBACK_ROUTE = '/dsh-reminder-notify/feedback'
       historyActionQuietSkip: '免打扰跳过',
       historyChart: '最近 30 天',
       historyChartHint: '每根柱子一天，越长说明那天弹得越多；鼠标停住看日期与条数。',
+      groupBackup: '备份与恢复',
+      backupHint: '重装插件会把设置重置成默认值；这里每天自动留一份，也能随时手动备份/导出/恢复。',
+      backupNow: '备份一次',
+      backupExport: '导出配置',
+      backupRestoreLatest: '恢复最近一次',
+      backupImport: '导入配置',
+      backupImportPlaceholder: '把导出的 JSON 粘到这里，再点「导入配置」。',
+      backupNone: '还没有备份。点「备份一次」就行。',
+      backupSaved: '已备份。',
+      backupRestored: '已恢复：',
+      backupExportHint: '导出会下载一个 JSON 文件（含推送地址等，别随便发给别人）。',
+      backupFailed: '操作失败：',
+      backupRestore: '恢复',
       groupStats: '本插件下载量',
       statsHint: '数据来自 npm 公开统计：安装、升级都会计一次，不等于人数；走 npm 的安装才算。',
       statsYesterday: '昨天',
@@ -699,6 +713,19 @@ const FEEDBACK_ROUTE = '/dsh-reminder-notify/feedback'
       historyActionQuietSkip: 'skipped (quiet hours)',
       historyChart: 'Last 30 days',
       historyChartHint: 'One bar per day; taller means more reminders. Hover for the date and count.',
+      groupBackup: 'Backup & restore',
+      backupHint: 'Reinstalling resets settings to defaults. A copy is kept here every day; you can also back up, export and restore by hand.',
+      backupNow: 'Back up now',
+      backupExport: 'Export config',
+      backupRestoreLatest: 'Restore latest',
+      backupImport: 'Import config',
+      backupImportPlaceholder: 'Paste an exported JSON here, then click “Import config”.',
+      backupNone: 'No backups yet — click “Back up now”.',
+      backupSaved: 'Backed up.',
+      backupRestored: 'Restored: ',
+      backupExportHint: 'Export downloads a JSON file (it contains your webhook URL — do not share it casually).',
+      backupFailed: 'Failed: ',
+      backupRestore: 'Restore',
       groupStats: 'This plugin\'s downloads',
       statsHint: 'From public npm stats: installs and upgrades both count, so this is downloads, not people.',
       statsYesterday: 'Yesterday',
@@ -973,6 +1000,7 @@ const FEEDBACK_ROUTE = '/dsh-reminder-notify/feedback'
       { id: 'queue', label: 'groupQueue', groups: ['queue'] },
       { id: 'cond', label: 'groupCond', groups: ['cond'] },
       { id: 'misc', label: 'groupAdvanced', groups: ['digest', 'history', 'balance', 'host'] },
+      { id: 'backup', label: 'groupBackup', groups: [] },
       { id: 'stats', label: 'groupStats', groups: [] },
       { id: 'feedback', label: 'groupFeedback', groups: [] },
       { id: 'help', label: 'groupHelp', groups: [] },
@@ -1042,6 +1070,9 @@ const FEEDBACK_ROUTE = '/dsh-reminder-notify/feedback'
       const [tray, setTray] = React.useState(null)
       const [doctorBusy, setDoctorBusy] = React.useState(false)
       const [stats, setStats] = React.useState(null)
+      const [backupList, setBackupList] = React.useState([])
+      const [backupBusy, setBackupBusy] = React.useState(false)
+      const [importText, setImportText] = React.useState('')
       const [statsBusy, setStatsBusy] = React.useState(false)
       const [feedbackText, setFeedbackText] = React.useState('')
       const [feedbackCategory, setFeedbackCategory] = React.useState('suggest')
@@ -1114,6 +1145,7 @@ const FEEDBACK_ROUTE = '/dsh-reminder-notify/feedback'
         refreshTray()
         refreshDigest()
         refreshStats()
+        refreshBackup()
         refreshFeedback()
       }, [])
 
@@ -2044,6 +2076,115 @@ const FEEDBACK_ROUTE = '/dsh-reminder-notify/feedback'
         }
       }
 
+      // 0.33：配置备份与恢复
+      async function refreshBackup() {
+        try {
+          const res = await fetch(BACKUP_ROUTE)
+          const data = await res.json()
+          if (data && Array.isArray(data.backups)) setBackupList(data.backups)
+        } catch {
+          /* 读不到就留着上一次 */
+        }
+      }
+
+      async function backupAction(action, name) {
+        setBackupBusy(true)
+        try {
+          const res = await fetch(BACKUP_ROUTE, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ action, name }),
+          })
+          const data = await res.json()
+          if (!data || data.ok !== true) throw new Error((data && data.error) || 'failed')
+          if (action === 'save') setMessage({ kind: 'ok', text: label('backupSaved') + ' ' + String(data.name || '') })
+          else setMessage({ kind: 'ok', text: label('backupRestored') + String(data.restored === undefined ? '' : data.restored) })
+          await refreshBackup()
+        } catch (error) {
+          setMessage({ kind: 'error', text: label('backupFailed') + ' ' + String((error && error.message) || error) })
+        } finally {
+          setBackupBusy(false)
+        }
+      }
+
+      async function importBackup() {
+        const raw = String(importText || '').trim()
+        if (raw === '') {
+          setMessage({ kind: 'error', text: label('backupImportPlaceholder') })
+          return
+        }
+        setBackupBusy(true)
+        try {
+          const res = await fetch(BACKUP_ROUTE, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ action: 'import', json: raw }),
+          })
+          const data = await res.json()
+          if (!data || data.ok !== true) throw new Error((data && data.error) || 'failed')
+          setImportText('')
+          setMessage({ kind: 'ok', text: label('backupRestored') + String(data.restored === undefined ? '' : data.restored) })
+          await refreshBackup()
+        } catch (error) {
+          setMessage({ kind: 'error', text: label('backupFailed') + ' ' + String((error && error.message) || error) })
+        } finally {
+          setBackupBusy(false)
+        }
+      }
+
+      function backupBlock() {
+        const list = Array.isArray(backupList) ? backupList : []
+        return [
+          h(
+            'div',
+            { className: 'drn-help', key: 'backup-panel' },
+            h('div', { className: 'drn-head-intro' }, label('backupHint')),
+            h(
+              'div',
+              { className: 'drn-pick' },
+              h('button', { type: 'button', className: 'drn-btn drn-digest-btn', disabled: backupBusy, onClick: () => backupAction('save', '') }, label('backupNow')),
+              h(
+                'a',
+                { className: 'drn-btn drn-digest-btn', href: BACKUP_ROUTE + '?download=1', target: '_blank', rel: 'noreferrer' },
+                label('backupExport'),
+              ),
+              h('button', { type: 'button', className: 'drn-btn drn-digest-btn', disabled: backupBusy || list.length === 0, onClick: () => backupAction('restore', '') }, label('backupRestoreLatest')),
+            ),
+            h('div', { className: 'drn-hint' }, label('backupExportHint')),
+            list.length === 0
+              ? h('div', { className: 'drn-hint' }, label('backupNone'))
+              : h(
+                  'div',
+                  { className: 'drn-help' },
+                  list.slice(0, 5).map((item) =>
+                    h(
+                      'div',
+                      { className: 'drn-hint', key: String(item && item.name) },
+                      shortTime(item && item.at) + ' · ' + Math.max(1, Math.round(Number(item && item.size) / 1024)) + ' KB ',
+                      h(
+                        'button',
+                        { type: 'button', className: 'drn-btn drn-digest-btn', disabled: backupBusy, onClick: () => backupAction('restore', item && item.name) },
+                        label('backupRestore'),
+                      ),
+                    ),
+                  ),
+                ),
+            h('textarea', {
+              className: 'drn-feedback-text',
+              rows: 3,
+              value: importText,
+              placeholder: label('backupImportPlaceholder'),
+              onChange: (event) => setImportText(event.currentTarget.value),
+            }),
+            h(
+              'div',
+              { className: 'drn-pick' },
+              h('button', { type: 'button', className: 'drn-btn drn-digest-btn', disabled: backupBusy || String(importText || '').trim() === '', onClick: () => importBackup() }, label('backupImport')),
+            ),
+          ),
+        ]
+      }
+
       // 0.32：本插件下载量（npm 公开统计）
       async function refreshStats(force) {
         setStatsBusy(true)
@@ -2247,7 +2388,7 @@ const FEEDBACK_ROUTE = '/dsh-reminder-notify/feedback'
 
       const advanced = ADV_BLOCKS.map((block) => {
         const open = openBlocks[block.id] === true
-        const children = block.id === 'stats' ? statsBlock() : block.id === 'feedback' ? feedbackBlock() : block.id === 'doctor'
+        const children = block.id === 'backup' ? backupBlock() : block.id === 'stats' ? statsBlock() : block.id === 'feedback' ? feedbackBlock() : block.id === 'doctor'
           ? [
               h(
                 'div',

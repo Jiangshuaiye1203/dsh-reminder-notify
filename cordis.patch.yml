@@ -140,6 +140,8 @@
         statsEnabled: true
         statsCacheMinutes: 10
         feedbackEnabled: true
+        backupEnabled: true
+        backupDir: ''
         feedbackFile: ''
         feedbackRepo: Jiangshuaiye1203/dsh-reminder-notify
         pushReply: true

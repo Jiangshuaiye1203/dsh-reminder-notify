@@ -46,6 +46,8 @@ export const Config = z === null ? undefined : z.object({
   seconds: z.number().min(2).max(600).step(1).default(60).description('弹窗停留秒数（2–600）').volatile(),
   position: z.union(['br', 'center', 'tr']).default('br').description('弹窗位置：br 右下、center 居中、tr 右上').volatile(),
   cardsEnabled: z.boolean().default(true).description('总开关：关掉后不再弹出任何提醒卡片（历史、日报推送照常）').volatile(),
+  backupEnabled: z.boolean().default(true).description('自动备份配置到本机（每天一份，恢复时可回滚）').volatile(),
+  backupDir: z.string().default('').description('备份目录，留空用 ~/.dsh/dsh-reminder-notify/backups').volatile(),
   statsEnabled: z.boolean().default(true).description('面板里显示本插件的 npm 下载量（来自 npm 公开统计）').volatile(),
   statsCacheMinutes: z.number().min(1).max(1440).step(1).default(10).description('下载量缓存多少分钟，免得每次打开面板都去查').volatile(),
   feedbackEnabled: z.boolean().default(true).description('面板里允许写反馈留言').volatile(),
@@ -259,6 +261,8 @@ function settingsOf(config) {
     position: POSITIONS.has(position) ? position : 'br',
     cardsEnabled: c.cardsEnabled !== false,
     statsEnabled: c.statsEnabled !== false,
+    backupEnabled: c.backupEnabled !== false,
+    backupDir: str(c.backupDir, ''),
     statsCacheMinutes: Math.round(clamp(num(c.statsCacheMinutes, 10), 1, 1440)),
     feedbackEnabled: c.feedbackEnabled !== false,
     feedbackFile: str(c.feedbackFile, ''),
@@ -3235,6 +3239,158 @@ async function fetchNpmStats(settings, force = false) {
   }
 }
 
+// 0.33：配置备份与恢复。重装/改坏之后能回滚，也能导出给别人看。
+const BACKUP_ROUTE = '/dsh-reminder-notify/backup'
+const BACKUP_KEEP = 20
+
+export function backupDirOf(settings) {
+  return settings.backupDir === '' ? path.join(os.homedir(), '.dsh', 'dsh-reminder-notify', 'backups') : settings.backupDir
+}
+
+export function listBackups(settings) {
+  try {
+    const dir = backupDirOf(settings)
+    const names = fs.readdirSync(dir).filter((name) => /^config-\d+\.json$/.test(name))
+    const out = []
+    for (const name of names) {
+      try {
+        const stat = fs.statSync(path.join(dir, name))
+        out.push({ name, at: Number(name.replace(/\D/g, '')) || 0, size: stat.size })
+      } catch {
+        /* 跳过读不到的 */
+      }
+    }
+    out.sort((left, right) => right.at - left.at)
+    return out
+  } catch {
+    return []
+  }
+}
+
+export function backupNow(settings, now = Date.now()) {
+  const dir = backupDirOf(settings)
+  const name = 'config-' + String(now) + '.json'
+  const file = path.join(dir, name)
+  try {
+    fs.mkdirSync(dir, { recursive: true })
+    fs.writeFileSync(file, JSON.stringify({ version: packageVersion(), at: now, values: settings }, null, 2))
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) }
+  }
+  for (const item of listBackups(settings).slice(BACKUP_KEEP)) {
+    try {
+      fs.unlinkSync(path.join(dir, item.name))
+    } catch {
+      /* 清不掉就算了 */
+    }
+  }
+  return { ok: true, dir, name, at: now }
+}
+
+export function readBackup(file) {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(file, 'utf8'))
+    if (parsed !== null && typeof parsed === 'object' && parsed.values !== null && typeof parsed.values === 'object') return parsed
+    return null
+  } catch {
+    return null
+  }
+}
+
+function pickKnownSettings(values, base) {
+  const patch = {}
+  for (const key of Object.keys(base)) {
+    if (values[key] !== undefined) patch[key] = values[key]
+  }
+  return patch
+}
+
+function registerBackupRoute(ctx, getSettings) {
+  const route = {
+    kind: 'exact',
+    path: BACKUP_ROUTE,
+    handler: async (req, res) => {
+      const settings = getSettings()
+      const reply = (status, payload) => {
+        res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+        res.end(JSON.stringify(payload))
+      }
+      const url = new URL(req.url ?? BACKUP_ROUTE, 'http://127.0.0.1')
+      if (req.method === 'GET') {
+        if (url.searchParams.get('download') === '1') {
+          const body = JSON.stringify({ version: packageVersion(), at: Date.now(), values: settings }, null, 2)
+          res.writeHead(200, {
+            'content-type': 'application/json; charset=utf-8',
+            'content-disposition': 'attachment; filename="dsh-reminder-notify-config.json"',
+            'cache-control': 'no-store',
+          })
+          res.end(body)
+          return
+        }
+        const list = listBackups(settings)
+        reply(200, { ok: true, enabled: settings.backupEnabled === true, dir: backupDirOf(settings), count: list.length, backups: list.slice(0, 10) })
+        return
+      }
+      if (req.method !== 'POST') {
+        reply(405, { ok: false, error: 'method-not-allowed' })
+        return
+      }
+      const body = await readJsonBody(req)
+      const action = str(body?.action, 'save')
+      const base = settingsOf({})
+      if (action === 'save') {
+        const made = backupNow(settings)
+        reply(made.ok === true ? 200 : 500, { ...made, action: 'save', dir: backupDirOf(settings), count: listBackups(settings).length })
+        return
+      }
+      if (action === 'restore') {
+        const wanted = str(body?.name, '')
+        const list = listBackups(settings)
+        const picked = wanted === '' ? (list.length > 0 ? list[0] : null) : list.find((item) => item.name === wanted) ?? null
+        if (picked === null) {
+          reply(404, { ok: false, error: 'backup-not-found' })
+          return
+        }
+        const doc = readBackup(path.join(backupDirOf(settings), picked.name))
+        if (doc === null) {
+          reply(400, { ok: false, error: 'backup-invalid' })
+          return
+        }
+        backupNow(settings)
+        const patch = pickKnownSettings(doc.values, base)
+        await saveBalanceState(ctx, patch)
+        reply(200, { ok: true, action: 'restore', name: picked.name, restored: Object.keys(patch).length })
+        return
+      }
+      if (action === 'import') {
+        const raw = str(body?.json, '')
+        let parsed = null
+        try {
+          parsed = JSON.parse(raw)
+        } catch {
+          parsed = null
+        }
+        if (parsed === null || typeof parsed !== 'object') {
+          reply(400, { ok: false, error: 'json-invalid' })
+          return
+        }
+        const values = parsed.values !== null && typeof parsed.values === 'object' ? parsed.values : parsed
+        backupNow(settings)
+        const patch = pickKnownSettings(values, base)
+        if (Object.keys(patch).length === 0) {
+          reply(400, { ok: false, error: 'no-known-keys' })
+          return
+        }
+        await saveBalanceState(ctx, patch)
+        reply(200, { ok: true, action: 'import', restored: Object.keys(patch).length })
+        return
+      }
+      reply(400, { ok: false, error: 'unknown-action' })
+    },
+  }
+  mountRoute(ctx, route, 'dsh-reminder-notify: backup route')
+}
+
 function registerStatsRoute(ctx, getSettings) {
   const route = {
     kind: 'exact',
@@ -3838,6 +3994,18 @@ function nodeKind(kind) {
 
 export function apply(ctx, config) {
   const getSettings = () => settingsOf({ ...config, ...runtimePatch })
+  // 0.33：每天自动留一份配置备份（同一天不重复写）。
+  try {
+    const bootSettings = getSettings()
+    if (bootSettings.backupEnabled === true) {
+      const midnight = Date.parse(todayKey() + 'T00:00:00')
+      if (Number.isFinite(midnight) && listBackups(bootSettings).every((item) => item.name !== 'config-' + String(midnight) + '.json')) {
+        backupNow(bootSettings, midnight)
+      }
+    }
+  } catch {
+    /* 备份失败不影响插件启动 */
+  }
   // 0.31.1：启动时若历史里今天已有日报，先把日期补上，避免重启/装完后连弹。
   try {
     const bootSettings = getSettings()
@@ -3870,6 +4038,7 @@ export function apply(ctx, config) {
   registerMobileAssets(ctx, () => settingsOf(config))
   registerStatsRoute(ctx, () => settingsOf(config))
   registerFeedbackRoute(ctx, () => settingsOf(config))
+  registerBackupRoute(ctx, () => settingsOf(config))
   {
     let proxy = null
     const ensureHttps = () => {

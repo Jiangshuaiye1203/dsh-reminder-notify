@@ -3,7 +3,7 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { mobileProxyPathOk, httpsLinkOf, mobileBarsOf, mobileCsvOf, mobileSettingsPatch, mobileViewOf, attachmentSummaryOf, mobileAttachmentsOf, uploadNameFor, condStateAfter, choicePromptText, choicesArgOf, normalizeChoices, resetChoiceSeen, unreadChoices, customButtonsOf, customButtonsSpec, escapeHtml, mobileLinkOf, mobilePageOf, phonePromptText, repliesOf, resetPhoneSeen, unreadPhoneReplies, digestDue, digestShownToday, digestMessage, doctorReport, evaluateConditions, historyStats, inQuietHours, nextRunAfter, parseClock, parseCustomButtons, parseEvery, pushPayload, quietEndAt, todayKey, toastArgsOf, feedbackEntryOf, issueUrlOf, envSummaryOf, statsOf, feedbackPathOf } from '../index.js'
+import { mobileProxyPathOk, httpsLinkOf, mobileBarsOf, mobileCsvOf, mobileSettingsPatch, mobileViewOf, attachmentSummaryOf, mobileAttachmentsOf, uploadNameFor, condStateAfter, choicePromptText, choicesArgOf, normalizeChoices, resetChoiceSeen, unreadChoices, customButtonsOf, customButtonsSpec, escapeHtml, mobileLinkOf, mobilePageOf, phonePromptText, repliesOf, resetPhoneSeen, unreadPhoneReplies, digestDue, digestShownToday, digestMessage, doctorReport, evaluateConditions, historyStats, inQuietHours, nextRunAfter, parseClock, parseCustomButtons, parseEvery, pushPayload, quietEndAt, todayKey, toastArgsOf, feedbackEntryOf, issueUrlOf, envSummaryOf, statsOf, feedbackPathOf, backupNow, listBackups, readBackup, backupDirOf } from '../index.js'
 
 let failed = 0
 function check(label, actual, expected) {
@@ -373,6 +373,22 @@ check('issueUrlOf 指向 issues/new', issue.startsWith('https://github.com/Jiang
 check('issueUrlOf 带正文编码', issue.includes(encodeURIComponent(feed.text)), true)
 check('issueUrlOf 剥掉 https 前缀', issueUrlOf('https://github.com/a/b.git', feed, envSample).startsWith('https://github.com/a/b/issues/new'), true)
 check('issueUrlOf 仓库非法返回空', issueUrlOf('nope', feed, envSample), '')
+
+// 0.33：配置备份与恢复
+const tmpBackupDir = fs.mkdtempSync(path.join(os.tmpdir(), 'drn-backup-'))
+check('backupDirOf 默认在用户目录', backupDirOf({ backupDir: '' }).endsWith('backups'), true)
+check('backupDirOf 尊重自定义目录', backupDirOf({ backupDir: tmpBackupDir }), tmpBackupDir)
+const backupSettings = { backupDir: tmpBackupDir, sound: true, seconds: 60, pushUrl: 'https://example.com/hook' }
+const firstBackup = backupNow(backupSettings, 1795200000000)
+check('backupNow 写成功', firstBackup.ok, true)
+const backupFiles = listBackups(backupSettings)
+check('listBackups 能列出来', backupFiles.length, 1)
+check('listBackups 时间对得上', backupFiles[0].at, 1795200000000)
+const roundTrip = readBackup(path.join(tmpBackupDir, backupFiles[0].name))
+check('readBackup 读回 values', [roundTrip.values.seconds, roundTrip.values.pushUrl], [60, 'https://example.com/hook'])
+check('readBackup 坏文件返回 null', readBackup(path.join(tmpBackupDir, 'nope.json')), null)
+for (const item of backupFiles) fs.unlinkSync(path.join(tmpBackupDir, item.name))
+fs.rmdirSync(tmpBackupDir)
 
 
 if (failed > 0) {
