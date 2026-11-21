@@ -11,6 +11,7 @@
 
 import { spawn } from 'node:child_process'
 import fs from 'node:fs'
+import https from 'node:https'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -1649,6 +1650,33 @@ export function doctorReport(ctx, getSettings) {
   add('account', service('deepseekAccount') !== undefined, service('deepseekAccount') === undefined ? '读不到余额（不影响卡片）' : '可读余额')
   add('service-api', typeof ctx.provide === 'function', typeof ctx.provide === 'function' ? "可 provide('reminder')" : '旧宿主没有 ctx.provide')
 
+  // 0.16.1：GitHub 连通性。Steam++（Watt Toolkit）加速 GitHub 靠改 hosts 把 github.com
+  // 指到 127.0.0.1，由它的本地代理接住；它没接管（只开了进程没点「一键加速」/被强杀）时，
+  // 浏览器和 git 都会连不上。这里做静态判断：hosts 里有没有本机重定向。
+  // 真正「能不能连」用 POST /doctor {mode:'github'} 现测。
+  const hostsFile = process.platform === 'win32'
+    ? path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'drivers', 'etc', 'hosts')
+    : '/etc/hosts'
+  let githubLines = []
+  try {
+    githubLines = fs.readFileSync(hostsFile, 'utf8')
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => line !== '' && !line.startsWith('#'))
+      .filter((line) => /^\d{1,3}(\.\d{1,3}){3}\s/.test(line))
+      .filter((line) => /github\.com|githubusercontent\.com/i.test(line))
+  } catch {
+    githubLines = []
+  }
+  const loopback = githubLines.filter((line) => /^127\.0\.0\.1\s/.test(line))
+  if (githubLines.length === 0) {
+    add('github', true, 'hosts 里没有 github 重定向（裸连）')
+  } else if (loopback.length === 0) {
+    add('github', true, 'hosts 指向 ' + githubLines[0].split(/\s+/)[0])
+  } else {
+    add('github', false, 'hosts 把 github 指到 127.0.0.1（Steam++ 加速表）；加速器没接管就连不上，跑 scripts/github-push.ps1 会自动处理')
+  }
+
   const lastExit = hostHealth.lastExit
   const hostOk = lastExit === null || lastExit === 0
   add('host-exit', hostOk, lastExit === null ? '还没有弹过卡片' : `最近一次退出码 ${lastExit}`)
@@ -1673,6 +1701,37 @@ export function doctorReport(ctx, getSettings) {
 
 const DOCTOR_ROUTE = '/dsh-reminder-notify/doctor'
 
+/** 现测一次 https://github.com（HEAD，8 秒超时）。 */
+export function probeGithub(timeoutMs = 8000) {
+  const started = Date.now()
+  return new Promise((resolve) => {
+    let settled = false
+    const done = (payload) => {
+      if (settled) return
+      settled = true
+      resolve({ ...payload, ms: Date.now() - started })
+    }
+    try {
+      const req = https.request(
+        { method: 'HEAD', host: 'github.com', path: '/', timeout: timeoutMs, headers: { 'user-agent': 'dsh-reminder-notify-doctor' } },
+        (res) => {
+          res.resume()
+          const code = res.statusCode ?? 0
+          done({ ok: code >= 200 && code < 500, statusCode: code })
+        },
+      )
+      req.on('timeout', () => {
+        req.destroy()
+        done({ ok: false, error: `timeout ${timeoutMs}ms` })
+      })
+      req.on('error', (error) => done({ ok: false, error: String(error?.message ?? error) }))
+      req.end()
+    } catch (error) {
+      done({ ok: false, error: String(error?.message ?? error) })
+    }
+  })
+}
+
 function registerDoctorRoute(ctx, getSettings) {
   const web = typeof ctx.get === 'function' ? ctx.get('webServer') : undefined
   if (web === undefined || web === null || typeof web.register !== 'function') {
@@ -1695,6 +1754,10 @@ function registerDoctorRoute(ctx, getSettings) {
         const body = await readJsonBody(req)
         const mode = body !== null && typeof body === 'object' ? str(body.mode, 'check') : 'check'
         if (mode === 'check') return reply(res, 200, { ok: true, report: doctorReport(ctx, getSettings) })
+        if (mode === 'github') {
+          const probe = await probeGithub()
+          return reply(res, 200, { ok: true, mode: 'github', github: probe })
+        }
         if (mode === 'probe') {
           const card = await notify(
             'raw',

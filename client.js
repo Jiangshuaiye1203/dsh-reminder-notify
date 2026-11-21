@@ -276,6 +276,10 @@ window.__ModuleLoader__.load({
       doctorProbe: '弹样卡',
       doctorProbeOk: '样卡已弹出，能看到就说明宿主正常。',
       doctorProbeFailed: '自检失败：',
+      doctorGithub: '测 GitHub',
+      doctorGithubOk: 'GitHub 能连上：HTTP ',
+      doctorGithubFailed: 'GitHub 连不上：',
+      check_github: 'GitHub 连通性',
       doctorLastExit: '最近退出码',
       doctorFailures: '最近失败次数',
       check_platform: '系统',
@@ -412,6 +416,10 @@ window.__ModuleLoader__.load({
       doctorProbe: 'Probe a card',
       doctorProbeOk: 'A probe card is on screen; if you can see it, the host is fine.',
       doctorProbeFailed: 'Self-check failed: ',
+      doctorGithub: 'Test GitHub',
+      doctorGithubOk: 'GitHub reachable: HTTP ',
+      doctorGithubFailed: 'GitHub unreachable: ',
+      check_github: 'GitHub reachability',
       doctorLastExit: 'last exit code',
       doctorFailures: 'recent failures',
       check_platform: 'platform',
@@ -943,11 +951,11 @@ window.__ModuleLoader__.load({
         setMessage(null)
         Promise.resolve()
           .then(() => {
-            const init = mode === 'probe'
+            const init = mode === 'probe' || mode === 'github'
               ? {
                   method: 'POST',
                   headers: { 'content-type': 'application/json', accept: 'application/json' },
-                  body: JSON.stringify({ mode: 'probe' }),
+                  body: JSON.stringify({ mode }),
                 }
               : { headers: { accept: 'application/json' } }
             return fetch(DOCTOR_ROUTE, init)
@@ -967,6 +975,15 @@ window.__ModuleLoader__.load({
             setDoctorBusy(false)
             if (data && data.report) setDoctor(data.report)
             const label = typeof t === 'function' ? t : (key) => key
+            if (mode === 'github') {
+              const probe = data && data.github ? data.github : {}
+              if (probe.ok === true) {
+                setMessage({ ok: true, text: label('doctorGithubOk') + String(probe.statusCode || '') + ' · ' + String(probe.ms || 0) + 'ms' })
+              } else {
+                setMessage({ ok: false, text: label('doctorGithubFailed') + String(probe.error || ('HTTP ' + (probe.statusCode || 0))) })
+              }
+              return
+            }
             if (mode === 'probe') {
               const card = data && data.card ? data.card : {}
               if (card.ok === false) {
@@ -1504,6 +1521,11 @@ window.__ModuleLoader__.load({
                     'button',
                     { type: 'button', className: 'drn-btn drn-digest-btn', disabled: doctorBusy, onClick: () => runDoctor('probe') },
                     label('doctorProbe'),
+                  ),
+                  h(
+                    'button',
+                    { type: 'button', className: 'drn-btn drn-digest-btn', disabled: doctorBusy, onClick: () => runDoctor('github') },
+                    label(doctorBusy ? 'doctorRunning' : 'doctorGithub'),
                   ),
                 ),
               ),

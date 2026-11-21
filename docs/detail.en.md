@@ -11,3 +11,4 @@ Cards are drawn by the bundled `host/ReminderHost.ps1` with the built-in PowerSh
 - **Want it on your phone**: open push under "Digest & push", pick the format, paste your own webhook URL (WeCom bot or Server Chan), then press "Send one now".
 - **Everything else**: folded into "How it works (expand to read)" inside the settings panel below, one topic at a time.
 - **For other plugins**: this plugin exposes a `reminder` service (`notify` / `digest` / `stats` / `config`); see the README.
+- The self-check now has a **GitHub reachability** item (it flags hosts entries pointing github.com at 127.0.0.1, i.e. the Steam++ acceleration table) plus a **Test GitHub** button; `scripts/github-push.ps1` repairs that state around a push and restores hosts afterwards.

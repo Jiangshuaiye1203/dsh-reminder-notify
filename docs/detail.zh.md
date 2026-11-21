@@ -11,3 +11,4 @@
 - **想推到手机**：在「日报与推送」里打开推送、选格式、填自己的 webhook 地址（企业微信机器人或 Server 酱），点「现在发一条」验证。
 - **其余说明**：全部收在下面设置面板的「使用说明（点开才看）」里，一次只展开一条。
 - **给别的插件用**：本插件对外提供 `reminder` 服务（`notify` / `digest` / `stats` / `config`），写法见 README。
+- 自检里新增「GitHub 连通性」：hosts 里有指向 127.0.0.1 的 github 行（Steam++ 加速表）时标红，另有「测 GitHub」按钮现测一次；推送用 `scripts/github-push.ps1` 可自动处理并还原。

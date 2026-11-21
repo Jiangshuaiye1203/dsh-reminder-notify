@@ -102,6 +102,19 @@ reminder.config()                             // 当前生效配置的只读副�
 
 ## 出问题先自检（0.16 起）
 
+面板「高级：历史、余额与宿主」里的「工程与可靠性：自检」有三个按钮：**运行自检**（逐项打勾）、**弹样卡**、**测 GitHub**。
+其中「GitHub 连通性」一项会在 hosts 里发现「把 github.com 指到 127.0.0.1」的本机重定向时标红——那是 Steam++（Watt Toolkit）
+加速 GitHub 的做法：加速器在跑时正常，它没接管（只开了进程没点「一键加速」/被强杀）时浏览器和 git 都会连不上。
+
+推送时如果遇到这种情况，直接跑：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/github-push.ps1 -Token ghp_xxx
+```
+
+它会先测通不通；不通且发现本机重定向就临时注释 + 刷 DNS 再测，通了才 push，结束再按原样还原 hosts（`-KeepChanges` 保留改动、`-DryRun` 只探测不推送）。
+
+
 设置面板最下面的「工程与可靠性：自检」里有两个按钮：
 
 - **运行自检**：逐条检查系统 / PowerShell / 宿主脚本 / 提示音目录与文件 / 历史文件可写 / 面板路由 / `notify_user` / 配置可写 / 余额接口 / 宿主服务 API / 最近一次宿主退出码，✗ 会带上具体路径或原因。
