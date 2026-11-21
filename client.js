@@ -733,6 +733,7 @@ const EXPORT_ROUTE = '/dsh-reminder-notify/export'
 .drn-fold-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; box-sizing: border-box; font: inherit; font-size: 12px; font-weight: 600; color: var(--dsw-alias-label-secondary); background: transparent; border: 0; padding: 10px 14px; cursor: pointer; text-align: left; }
 .drn-fold-body { display: flex; flex-direction: column; gap: 12px; padding: 0 14px 14px; }
 .drn-fold-body > .drn-group { border: 0; padding: 0; background: transparent; }
+.drn-fold-body > .drn-group > .drn-group-title { display: none; }
 .drn-help { display: flex; flex-direction: column; gap: 8px; }
 .drn-help-body { font-size: 12px; line-height: 1.6; color: var(--dsw-alias-label-secondary); white-space: pre-wrap; }
 .drn-chevron { font-size: 11px; }
@@ -1913,7 +1914,28 @@ const EXPORT_ROUTE = '/dsh-reminder-notify/export'
         return label('summaryPrefix') + parts.join(' · ')
       }
 
-      const common = [groupCard('basic'), groupCard('digest', COMMON_DIGEST, true)]
+      const foldOf = (id, labelKey, children) => {
+        const open = openBlocks[id] === true
+        return h(
+          'div',
+          { className: 'drn-fold', key: 'fold-' + id },
+          h(
+            'button',
+            {
+              type: 'button',
+              className: 'drn-fold-head',
+              onClick: () => setOpenBlocks(Object.assign({}, openBlocks, { [id]: !open })),
+            },
+            h('span', null, label(labelKey)),
+            h('span', { className: 'drn-chevron' }, open ? '▾ ' + label('foldCollapse') : '▸ ' + label('foldExpand')),
+          ),
+          h('div', { className: 'drn-fold-body', style: open ? undefined : { display: 'none' } }, children),
+        )
+      }
+      const common = [
+        groupCard('basic'),
+        foldOf('digest', 'groupDigest', [groupCard('digest', COMMON_DIGEST, true)]),
+      ]
 
       async function trayAction(action) {
         try {
@@ -2050,21 +2072,7 @@ const EXPORT_ROUTE = '/dsh-reminder-notify/export'
           : block.groups.map((group) =>
               group === 'digest' ? groupCard('digest', ADV_DIGEST, false) : groupCard(group),
             )
-        return h(
-          'div',
-          { className: 'drn-fold', key: 'fold-' + block.id },
-          h(
-            'button',
-            {
-              type: 'button',
-              className: 'drn-fold-head',
-              onClick: () => setOpenBlocks(Object.assign({}, openBlocks, { [block.id]: !open })),
-            },
-            h('span', null, label(block.label)),
-            h('span', { className: 'drn-chevron' }, open ? '▾ ' + label('foldCollapse') : '▸ ' + label('foldExpand')),
-          ),
-          h('div', { className: 'drn-fold-body', style: open ? undefined : { display: 'none' } }, children),
-        )
+        return foldOf(block.id, block.label, children)
       })
 
       const tryRow = h(

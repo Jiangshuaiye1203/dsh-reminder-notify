@@ -221,3 +221,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/github-push.ps1 -Tok
 宿主兜底：卡片该写结果文件却没写（被杀、被策略拦下、非零退出）时，会记一条 `host-failed` 到历史，并在 0.8 秒后**静音重试一次**（`retryHostOnce`，默认开）；最近 5 次失败原因显示在自检块里。
 
 CI 在 `.github/workflows/ci.yml`：Ubuntu 与 Windows 各跑 node 20/22，做语法检查 + 两套无窗口自检（真弹卡的自检只在本机跑，CI 没有交互桌面）。
+
+## 0.30 起：日报与推送也收起来了
+
+设置面板现在只留「基本」+「试试看」，其余（日报与推送、外观、提示音、排队与免打扰、条件提醒、历史·余额·宿主、使用说明、自检）全部是折叠条，点开头才展开；折叠里不再重复显示分组标题，版面更短。
