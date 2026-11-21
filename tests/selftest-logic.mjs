@@ -1,6 +1,6 @@
 // 纯逻辑自检：不弹窗口、不碰文件，只验证免打扰时段计算和历史统计。
 // 跑法：node tests/selftest-logic.mjs
-import { digestDue, digestMessage, doctorReport, historyStats, inQuietHours, parseClock, pushPayload, quietEndAt, todayKey } from '../index.js'
+import { condStateAfter, digestDue, digestMessage, doctorReport, evaluateConditions, historyStats, inQuietHours, parseClock, pushPayload, quietEndAt, todayKey, toastArgsOf } from '../index.js'
 
 let failed = 0
 function check(label, actual, expected) {
@@ -115,6 +115,25 @@ check('text 报文', pushPayload({ pushFormat: 'text' }, 'T', 'M').body, 'T\nM')
 check('text 的 content-type', pushPayload({ pushFormat: 'text' }, 'T', 'M').headers['content-type'], 'text/plain; charset=utf-8')
 const generic = JSON.parse(pushPayload({ pushFormat: 'json' }, 'T', 'M', { kind: 'decide' }).body)
 check('json 报文', [generic.title, generic.message, generic.kind], ['T', 'M', 'decide'])
+
+// —— 条件提醒（0.18） ——
+{
+  const now = new Date()
+  now.setHours(10, 0, 0, 0)
+  const base = { conditionsEnabled: true, condBalanceBelow: true, balanceEnabled: true, balanceBaseline: 100, balanceThresholds: '20,10,5', condQueueBacklog: 3, condHostFailures: 2, condCooldownMinutes: 120 }
+  const fired = evaluateConditions(base, { balance: 4, queueLength: 4, hostFailures: 3 }, now)
+  check('条件提醒命中三条', fired.map((item) => item.id), ['balance-below', 'queue-backlog', 'host-failures'])
+  check('条件关掉就一条都不弹', evaluateConditions({ ...base, conditionsEnabled: false }, { balance: 1, queueLength: 9, hostFailures: 9 }, now), [])
+  const state = condStateAfter(base, fired, now)
+  check('冷却内的条件不再重复', evaluateConditions({ ...base, condState: state }, { balance: 4, queueLength: 4, hostFailures: 3 }, now), [])
+  const later = new Date(now.getTime() + 121 * 60 * 1000)
+  check('冷却过了会再提醒', evaluateConditions({ ...base, condState: state }, { balance: 4, queueLength: 0, hostFailures: 0 }, later).map((item) => item.id), ['balance-below'])
+  check('余额高于阈值不提醒', evaluateConditions(base, { balance: 90 }, now), [])
+  check('条数预警每天只一次', evaluateConditions({ ...base, condDailyCount: 20 }, { todayCount: 25 }, now).map((item) => item.id), ['daily-count'])
+}
+const toast = toastArgsOf({ toastSeconds: 99 }, 'decide', 'T', 'M')
+check('系统通知秒数夹到 60', [toast.seconds, toast.icon], [60, 'Warning'])
+check('系统通知默认 Information', toastArgsOf({}, 'raw', 'T', 'M').icon, 'Information')
 
 if (failed > 0) {
   console.log(`\n${failed} 项失败`)

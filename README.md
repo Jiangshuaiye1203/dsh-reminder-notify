@@ -13,6 +13,12 @@ dsh plugin --profile desktop add link:<本目录绝对路径>
 
 装完新会话就有 `notify_user`。
 
+## 0.18 起多了什么
+
+- **条件提醒**：不用等模型调用，满足条件就自己弹一张——余额跌破阈值、卡片排队积压、宿主连续失败、进入免打扰时段、当天提醒条数超限（各条可单独开关，同一条有冷却）。
+- **原生系统通知**：`toastEnabled` 打开后，卡片弹出的同时在 Windows 右下角发一个系统气泡（`host/ToastHost.ps1`，`NotifyIcon.ShowBalloonTip`，3–60 秒）。
+- **托盘与热键**：`trayEnabled` 打开后起托盘图标（`host/TrayHost.ps1`），菜单里有静音 / 免打扰 / 打开目录；`Ctrl+Alt+R`（可改 `trayHotkey`）随时手弹一张提醒。面板「工程与可靠性：自检」里能启停托盘、发一条原生通知、看托盘状态。
+
 ## 0.17 起多了什么
 
 - **定时提醒**：`notify_user` 支持 `at: "22:00"`（今天已过就排到明天）或 `inMinutes: 25`，到点才弹，不进队列占位。

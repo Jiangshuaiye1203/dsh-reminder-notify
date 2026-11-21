@@ -23,6 +23,7 @@ window.__ModuleLoader__.load({
     // 0.11 新增：提醒历史（GET 拿统计+最近记录，POST { mode: 'clear' } 清空）。
     const HISTORY_ROUTE = '/dsh-reminder-notify/history'
     const DOCTOR_ROUTE = '/dsh-reminder-notify/doctor'
+    const TRAY_ROUTE = '/dsh-reminder-notify/tray'
 const EXPORT_ROUTE = '/dsh-reminder-notify/export'
     const DIGEST_ROUTE = '/dsh-reminder-notify/digest'
     // 下拉按扩展名分组：wav 一组、mp3 一组……组内按文件名排序，一眼能看出格式。
@@ -295,6 +296,41 @@ const EXPORT_ROUTE = '/dsh-reminder-notify/export'
       check_account: '余额接口',
       check_service_api: '宿主服务',
       check_host_exit: '宿主退出码',
+      groupCond: '条件提醒',
+      conditionsEnabled: '开启条件提醒',
+      conditionsEnabledHint: '满足条件时主动弹一张卡，不用等模型调用。每 60 秒检查一次。',
+      condBalanceBelow: '余额跌破阈值时提醒',
+      condBalanceBelowHint: '拿实时余额和「余额提醒」里的百分比阈值比较，命中就弹一张。',
+      condQueueBacklog: '排队超过几条时提醒',
+      condQueueBacklogHint: '积压的卡片超过这个数就提醒你（0 表示关闭这一条）。',
+      condHostFailures: '宿主连续失败几次时提醒',
+      condHostFailuresHint: '宿主画不出卡片累计到这个次数就提醒（0 表示关闭这一条）。',
+      condQuietEnter: '进入免打扰时段时提醒',
+      condQuietEnterHint: '每天进入免打扰时弹一张，提醒你之后的提醒会被压住。',
+      condDailyCount: '当天超过几条时提醒',
+      condDailyCountHint: '当天提醒条数超过这个数就提醒你「今天有点多」（0 表示关闭这一条）。',
+      condCooldownMinutes: '条件提醒最小间隔（分钟）',
+      condCooldownMinutesHint: '同一条条件在这段时间内只提醒一次。',
+      toastEnabled: '同时发系统通知',
+      toastEnabledHint: '卡片弹出的同时，在 Windows 右下角再弹一个系统气泡（关掉卡片也能看到）。',
+      toastSeconds: '系统通知停留秒数',
+      toastSecondsHint: '3–60 秒；系统会不会缩短由 Windows 决定。',
+      trayEnabled: '启动时开托盘图标',
+      trayEnabledHint: '托盘里能切静音 / 免打扰，也能用热键手动弹一张。',
+      trayHotkey: '手动弹卡热键',
+      trayHotkeyHint: '形如 Ctrl+Alt+R；托盘没开时不生效。',
+      trayStatus: '托盘状态',
+      trayRunning: '运行中',
+      trayStoppedState: '未启动',
+      trayStart: '启动托盘',
+      trayStop: '停止托盘',
+      trayToastTest: '发一条原生通知',
+      trayRefresh: '刷新状态',
+      trayToastOk: '系统通知已发（右下角应该出现气泡）。',
+      trayToastFailed: '系统通知没发出去。',
+      trayStarted: '托盘已启动，热键可以用了。',
+      trayStopped: '托盘已停止。',
+      trayFailed: '托盘操作失败：',
       speakEnabled: '朗读提醒内容',
       buttonsEnabled: '卡片显示按钮',
       snoozeMinutes: '「稍后提醒」延后分钟',
@@ -447,6 +483,41 @@ const EXPORT_ROUTE = '/dsh-reminder-notify/export'
       check_account: 'balance API',
       check_service_api: 'host service API',
       check_host_exit: 'host exit code',
+      groupCond: 'Conditional reminders',
+      conditionsEnabled: 'Enable conditional reminders',
+      conditionsEnabledHint: 'Pop a card by itself when a condition matches, without waiting for the model. Checked every 60 seconds.',
+      condBalanceBelow: 'Remind when balance drops below a threshold',
+      condBalanceBelowHint: 'Compares the live balance with the percentage thresholds from "Balance reminders" and pops a card when one is crossed.',
+      condQueueBacklog: 'Remind when the queue backs up',
+      condQueueBacklogHint: 'Remind you when more than this many cards are waiting (0 turns this rule off).',
+      condHostFailures: 'Remind after repeated host failures',
+      condHostFailuresHint: 'Remind you when the host has failed to draw this many times (0 turns this rule off).',
+      condQuietEnter: 'Remind when quiet hours start',
+      condQuietEnterHint: 'Pops one card a day when quiet hours begin, so you know later cards are held back.',
+      condDailyCount: 'Remind when the day gets busy',
+      condDailyCountHint: 'Remind you when today has more than this many cards (0 turns this rule off).',
+      condCooldownMinutes: 'Minimum minutes between conditional reminders',
+      condCooldownMinutesHint: 'The same condition reminds you at most once in this window.',
+      toastEnabled: 'Also send a system notification',
+      toastEnabledHint: 'Alongside the card, show a Windows balloon tip as well (visible even with the card closed).',
+      toastSeconds: 'System notification seconds',
+      toastSecondsHint: '3 to 60 seconds; Windows may shorten it.',
+      trayEnabled: 'Start the tray icon with the plugin',
+      trayEnabledHint: 'The tray lets you toggle mute / quiet hours and pop a card from a hotkey.',
+      trayHotkey: 'Manual card hotkey',
+      trayHotkeyHint: 'For example Ctrl+Alt+R; ignored while the tray is off.',
+      trayStatus: 'Tray status',
+      trayRunning: 'running',
+      trayStoppedState: 'not started',
+      trayStart: 'Start tray',
+      trayStop: 'Stop tray',
+      trayToastTest: 'Send a system notification',
+      trayRefresh: 'Refresh status',
+      trayToastOk: 'System notification sent (a balloon should appear).',
+      trayToastFailed: 'The system notification did not go out.',
+      trayStarted: 'The tray is running and the hotkey is live.',
+      trayStopped: 'The tray has stopped.',
+      trayFailed: 'Tray action failed: ',
       speakEnabled: 'Speak the reminder',
       buttonsEnabled: 'Show card buttons',
       snoozeMinutes: 'Snooze minutes',
@@ -654,6 +725,19 @@ const EXPORT_ROUTE = '/dsh-reminder-notify/export'
       { key: 'pushChat', group: 'digest', kind: 'text' },
       { key: 'pushDecide', group: 'digest', kind: 'boolean' },
       { key: 'pushDigest', group: 'digest', kind: 'boolean' },
+      // 0.18：条件提醒（余额、排队、宿主失败、免打扰、条数）。
+      { key: 'conditionsEnabled', group: 'cond', kind: 'boolean' },
+      { key: 'condBalanceBelow', group: 'cond', kind: 'boolean' },
+      { key: 'condQueueBacklog', group: 'cond', kind: 'number' },
+      { key: 'condHostFailures', group: 'cond', kind: 'number' },
+      { key: 'condQuietEnter', group: 'cond', kind: 'boolean' },
+      { key: 'condDailyCount', group: 'cond', kind: 'number' },
+      { key: 'condCooldownMinutes', group: 'cond', kind: 'number' },
+      // 0.18：原生系统通知与托盘热键。
+      { key: 'toastEnabled', group: 'host', kind: 'boolean' },
+      { key: 'toastSeconds', group: 'host', kind: 'number' },
+      { key: 'trayEnabled', group: 'host', kind: 'boolean' },
+      { key: 'trayHotkey', group: 'host', kind: 'text' },
       { key: 'hostMode', group: 'host', kind: 'select', options: ['script', 'exe'], optionLabels: ['hostModeScript', 'hostModeExe'] },
       { key: 'scriptPath', group: 'host', kind: 'text' },
       { key: 'powershellPath', group: 'host', kind: 'text' },
@@ -713,10 +797,21 @@ const EXPORT_ROUTE = '/dsh-reminder-notify/export'
       pushFormat: 'pushFormatHint',
       pushDecide: 'pushDecideHint',
       pushDigest: 'pushDigestHint',
+      conditionsEnabled: 'conditionsEnabledHint',
+      condBalanceBelow: 'condBalanceBelowHint',
+      condQueueBacklog: 'condQueueBacklogHint',
+      condHostFailures: 'condHostFailuresHint',
+      condQuietEnter: 'condQuietEnterHint',
+      condDailyCount: 'condDailyCountHint',
+      condCooldownMinutes: 'condCooldownMinutesHint',
+      toastEnabled: 'toastEnabledHint',
+      toastSeconds: 'toastSecondsHint',
+      trayEnabled: 'trayEnabledHint',
+      trayHotkey: 'trayHotkeyHint',
     }
 
-    const GROUPS = ['basic', 'audio', 'look', 'queue', 'history', 'digest', 'balance', 'host']
-    const GROUP_LABELS = { basic: 'groupBasic', audio: 'groupAudio', look: 'groupLook', queue: 'groupQueue', history: 'groupHistory', digest: 'groupDigest', balance: 'groupBalance', host: 'groupHost' }
+    const GROUPS = ['basic', 'audio', 'look', 'queue', 'cond', 'history', 'digest', 'balance', 'host']
+    const GROUP_LABELS = { basic: 'groupBasic', audio: 'groupAudio', look: 'groupLook', queue: 'groupQueue', cond: 'groupCond', history: 'groupHistory', digest: 'groupDigest', balance: 'groupBalance', host: 'groupHost' }
 
     // 0.13：面板分两层。常用层只放「不填就不对劲」的项，其余按主题收进四个折叠块。
     const COMMON_DIGEST = ['pushEnabled', 'pushUrl', 'pushFormat', 'digestEnabled', 'digestTime']
@@ -725,6 +820,7 @@ const EXPORT_ROUTE = '/dsh-reminder-notify/export'
       { id: 'look', label: 'groupLook', groups: ['look'] },
       { id: 'audio', label: 'groupAudio', groups: ['audio'] },
       { id: 'queue', label: 'groupQueue', groups: ['queue'] },
+      { id: 'cond', label: 'groupCond', groups: ['cond'] },
       { id: 'misc', label: 'groupAdvanced', groups: ['digest', 'history', 'balance', 'host'] },
       { id: 'help', label: 'groupHelp', groups: [] },
       { id: 'doctor', label: 'groupDoctor', groups: [] },
@@ -770,6 +866,7 @@ const EXPORT_ROUTE = '/dsh-reminder-notify/export'
       const [tryBusy, setTryBusy] = React.useState(null)
       const [helpOpen, setHelpOpen] = React.useState({})
       const [doctor, setDoctor] = React.useState(null)
+      const [tray, setTray] = React.useState(null)
       const [doctorBusy, setDoctorBusy] = React.useState(false)
 
       React.useEffect(() => {
@@ -831,6 +928,7 @@ const EXPORT_ROUTE = '/dsh-reminder-notify/export'
       React.useEffect(() => {
         refreshBalance()
         refreshHistory()
+        refreshTray()
         refreshDigest()
       }, [])
 
@@ -1540,6 +1638,34 @@ const EXPORT_ROUTE = '/dsh-reminder-notify/export'
 
       const common = [groupCard('basic'), groupCard('digest', COMMON_DIGEST, true)]
 
+      async function trayAction(action) {
+        try {
+          const res = await fetch(TRAY_ROUTE, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ action }),
+          })
+          const data = await res.json()
+          if (data && data.tray) setTray(data.tray)
+          if (action === 'toast') {
+            setMessage({ kind: data && data.sent ? 'ok' : 'error', text: label(data && data.sent ? 'trayToastOk' : 'trayToastFailed') })
+          } else {
+            setMessage({ kind: 'ok', text: label(action === 'stop' ? 'trayStopped' : 'trayStarted') })
+          }
+        } catch (error) {
+          setMessage({ kind: 'error', text: label('trayFailed') + ' ' + String(error && error.message ? error.message : error) })
+        }
+      }
+      async function refreshTray() {
+        try {
+          const res = await fetch(TRAY_ROUTE)
+          const data = await res.json()
+          if (data && data.tray) setTray(data.tray)
+        } catch {
+          /* 读不到就当作没开 */
+        }
+      }
+
       const advanced = ADV_BLOCKS.map((block) => {
         const open = openBlocks[block.id] === true
         const children = block.id === 'doctor'
@@ -1580,6 +1706,35 @@ const EXPORT_ROUTE = '/dsh-reminder-notify/export'
                     'button',
                     { type: 'button', className: 'drn-btn drn-digest-btn', disabled: doctorBusy, onClick: () => runDoctor('github') },
                     label(doctorBusy ? 'doctorRunning' : 'doctorGithub'),
+                  ),
+                ),
+                h(
+                  'div',
+                  { className: 'drn-hint', key: 'tray-state' },
+                  label('trayStatus') + ' ' + (tray && tray.running ? label('trayRunning') + ' · PID ' + String(tray.pid) : label('trayStoppedState')) + (tray && tray.hotkey ? ' · ' + String(tray.hotkey) : ''),
+                ),
+                h(
+                  'div',
+                  { className: 'drn-pick', key: 'tray-actions' },
+                  h(
+                    'button',
+                    { type: 'button', className: 'drn-btn drn-digest-btn', onClick: () => trayAction('start') },
+                    label('trayStart'),
+                  ),
+                  h(
+                    'button',
+                    { type: 'button', className: 'drn-btn drn-digest-btn', onClick: () => trayAction('stop') },
+                    label('trayStop'),
+                  ),
+                  h(
+                    'button',
+                    { type: 'button', className: 'drn-btn drn-digest-btn', onClick: () => trayAction('toast') },
+                    label('trayToastTest'),
+                  ),
+                  h(
+                    'button',
+                    { type: 'button', className: 'drn-btn drn-digest-btn', onClick: () => refreshTray() },
+                    label('trayRefresh'),
                   ),
                 ),
               ),

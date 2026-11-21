@@ -105,6 +105,19 @@ export const Config = z === null ? undefined : z.object({
   maxHoldSeconds: z.number().min(0).max(3600).step(5).default(0).description('单张卡最长停留秒数（0 = 不额外限制，仍以 600 为上限）').volatile(),
   pushDecide: z.boolean().default(true).description('「需要你来决定」档位也推到手机').volatile(),
   pushDigest: z.boolean().default(true).description('日报同时推到手机').volatile(),
+  conditionsEnabled: z.boolean().default(true).description('条件提醒总开关（余额、排队、宿主失败、免打扰、条数）').volatile(),
+  condBalanceBelow: z.boolean().default(true).description('余额跌破预警档时弹一张卡（复用余额基线与阈值）').volatile(),
+  condQueueBacklog: z.number().min(0).max(50).step(1).default(0).description('排队达到这么多条时弹卡提醒（0 = 关）').volatile(),
+  condHostFailures: z.number().min(0).max(20).step(1).default(0).description('宿主连续失败达到这么多次时弹卡提醒（0 = 关）').volatile(),
+  condQuietEnter: z.boolean().default(false).description('进入免打扰时段时弹一张卡告知').volatile(),
+  condDailyCount: z.number().min(0).max(500).step(1).default(0).description('今天提醒条数超过这个数时弹卡提醒（0 = 关）').volatile(),
+  condCooldownMinutes: z.number().min(0).max(1440).step(1).default(120).description('同一条件两次提醒之间的最小间隔分钟数').volatile(),
+  condState: z.string().default('').description('内部状态：各条件上次触发时间').volatile(),
+  toastEnabled: z.boolean().default(false).description('同时发一条 Windows 原生通知（右下角通知中心，不弹卡片）').volatile(),
+  toastSeconds: z.number().min(3).max(60).step(1).default(8).description('原生通知停留秒数').volatile(),
+  trayEnabled: z.boolean().default(false).description('启动托盘图标与全局热键（插件启动时自动拉起）').volatile(),
+  trayHotkey: z.string().default('Ctrl+Alt+R').description('托盘全局热键，形如 Ctrl+Alt+R').volatile(),
+  trayStateFile: z.string().default('').description('托盘静音/免打扰状态文件（留空用 ~/.dsh/dsh-reminder-notify/tray-state.json）').volatile(),
   retryHostOnce: z.boolean().default(true).description('宿主第一次没画出卡片时，自动静音重试一次').volatile(),
   dryRun: z.boolean().default(false).description('调试用：只试算参数、不真的弹窗（自检脚本会打开它）').volatile(),
 })
@@ -248,6 +261,19 @@ function settingsOf(config) {
     maxHoldSeconds: Math.round(clamp(num(c.maxHoldSeconds, 0), 0, 3600)),
     pushDecide: c.pushDecide !== false,
     pushDigest: c.pushDigest !== false,
+    conditionsEnabled: c.conditionsEnabled !== false,
+    condBalanceBelow: c.condBalanceBelow !== false,
+    condQueueBacklog: Math.round(clamp(num(c.condQueueBacklog, 0), 0, 50)),
+    condHostFailures: Math.round(clamp(num(c.condHostFailures, 0), 0, 20)),
+    condQuietEnter: c.condQuietEnter === true,
+    condDailyCount: Math.round(clamp(num(c.condDailyCount, 0), 0, 500)),
+    condCooldownMinutes: Math.round(clamp(num(c.condCooldownMinutes, 120), 0, 1440)),
+    condState: typeof c.condState === 'string' ? c.condState : '',
+    toastEnabled: c.toastEnabled === true,
+    toastSeconds: Math.round(clamp(num(c.toastSeconds, 8), 3, 60)),
+    trayEnabled: c.trayEnabled === true,
+    trayHotkey: str(c.trayHotkey, 'Ctrl+Alt+R'),
+    trayStateFile: str(c.trayStateFile, ''),
     retryHostOnce: c.retryHostOnce !== false,
     dryRun: c.dryRun === true,
   }
@@ -547,6 +573,9 @@ async function showItem(item) {
     os.tmpdir(),
     `dsh-reminder-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.json`,
   )
+  if (settings.toastEnabled === true) {
+    sendToast(settings, toastArgsOf(settings, item.kind, item.title, item.message))
+  }
   const argv = argvOfScriptHost({
     scriptPath,
     title: item.title,
@@ -646,7 +675,9 @@ async function notify(kind, args, settings) {
   // 0.17：单卡最长停留（maxHoldSeconds>0 时再压一道），避免 decide 卡一直挂在屏幕上。
   const seconds =
     settings.maxHoldSeconds > 0 ? Math.min(secondsWanted, settings.maxHoldSeconds) : secondsWanted
-  const sound = args.sound === false ? false : settings.sound
+  // 0.18：托盘里点了「静音」就不再响铃（卡片照常弹）。
+  const trayState = readTrayState(settings)
+  const sound = args.sound === false ? false : settings.sound && trayState.muted !== true
   const audio = audioNameOf(kind, settings)
   const speak = str(args.speak, settings.speakEnabled ? message : '')
 
@@ -704,7 +735,7 @@ async function notify(kind, args, settings) {
   }
 
   // 免打扰：decide 是「要人来拍板」的，任何时段都不能吞；其余档位按 quietMode 处理。
-  const quiet = kind !== 'decide' && inQuietHours(settings)
+  const quiet = kind !== 'decide' && (inQuietHours(settings) || trayState.quiet === true)
   const extras = appearanceOf(kind, settings)
 
   // 自检 / 调参用：只把将要传给宿主的参数算出来，不落任何进程、不写历史。
@@ -2042,6 +2073,324 @@ function registerHistoryRoute(ctx, getSettings) {
 /** Host 服务名：别的插件用 ctx.get('reminder') 拿它。 */
 export const SERVICE_NAME = 'reminder'
 
+// ===== 0.18.0：条件提醒、原生系统通知、托盘与热键 =====
+
+const TOAST_SCRIPT = path.join(PACKAGE_ROOT, 'host', 'ToastHost.ps1')
+const TRAY_SCRIPT = path.join(PACKAGE_ROOT, 'host', 'TrayHost.ps1')
+const TRAY_ROUTE = '/dsh-reminder-notify/tray'
+
+/** 读取托盘状态（静音 / 免打扰）。按 mtime 缓存，弹卡前读一次也不会拖慢。 */
+const trayCache = { file: '', mtime: 0, state: { muted: false, quiet: false } }
+
+export function trayStatePathOf(settings) {
+  const custom = str(settings?.trayStateFile, '')
+  if (custom !== '') return path.resolve(custom)
+  return path.join(os.homedir(), '.dsh', 'dsh-reminder-notify', 'tray-state.json')
+}
+
+export function readTrayState(settings) {
+  const file = trayStatePathOf(settings)
+  try {
+    const stat = fs.statSync(file)
+    if (trayCache.file === file && trayCache.mtime === stat.mtimeMs) return trayCache.state
+    const parsed = JSON.parse(fs.readFileSync(file, 'utf8'))
+    const state = { muted: parsed?.muted === true, quiet: parsed?.quiet === true }
+    trayCache.file = file
+    trayCache.mtime = stat.mtimeMs
+    trayCache.state = state
+    return state
+  } catch {
+    return { muted: false, quiet: false }
+  }
+}
+
+export function writeTrayState(settings, patch) {
+  const file = trayStatePathOf(settings)
+  const current = readTrayState(settings)
+  const next = {
+    muted: patch?.muted === undefined ? current.muted : patch.muted === true,
+    quiet: patch?.quiet === undefined ? current.quiet : patch.quiet === true,
+    at: Date.now(),
+  }
+  fs.mkdirSync(path.dirname(file), { recursive: true })
+  fs.writeFileSync(file, JSON.stringify(next), 'utf8')
+  trayCache.file = file
+  trayCache.mtime = fs.statSync(file).mtimeMs
+  trayCache.state = next
+  return next
+}
+
+/** 原生通知的参数（纯函数，方便单测）。 */
+export function toastArgsOf(settings, kind, title, message) {
+  return {
+    scriptPath: TOAST_SCRIPT,
+    title,
+    message,
+    seconds: Math.round(clamp(num(settings?.toastSeconds, 8), 3, 60)),
+    icon: kind === 'decide' ? 'Warning' : 'Information',
+  }
+}
+
+function sendToast(settings, payload) {
+  try {
+    if (!fs.existsSync(payload.scriptPath)) return false
+    const argv = [
+      '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden',
+      '-File', payload.scriptPath,
+      '-Title', payload.title, '-Msg', payload.message,
+      '-Seconds', String(payload.seconds), '-Icon', payload.icon,
+    ]
+    const child = spawn(settings.powershellPath, argv, {
+      cwd: PACKAGE_ROOT,
+      detached: false,
+      stdio: 'ignore',
+      windowsHide: true,
+    })
+    child.on('error', () => {})
+    child.unref()
+    return true
+  } catch {
+    return false
+  }
+}
+
+// ---- 托盘进程 ----
+let trayChild = null
+
+export function trayStatusOf(settings) {
+  return {
+    running: trayChild !== null && trayChild.exitCode === null,
+    pid: trayChild !== null && trayChild.exitCode === null ? trayChild.pid : null,
+    hotkey: settings.trayHotkey,
+    stateFile: trayStatePathOf(settings),
+    state: readTrayState(settings),
+    script: TRAY_SCRIPT,
+  }
+}
+
+function startTray(settings) {
+  if (trayChild !== null && trayChild.exitCode === null) return trayStatusOf(settings)
+  if (!fs.existsSync(TRAY_SCRIPT)) return { ...trayStatusOf(settings), error: 'tray-script-not-found' }
+  const argv = [
+    '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden',
+    '-File', TRAY_SCRIPT,
+    '-HostScript', path.resolve(settings.scriptPath),
+    '-AudioDir', path.resolve(settings.audioDir),
+    '-StateFile', trayStatePathOf(settings),
+    '-Hotkey', settings.trayHotkey,
+    '-Log', path.join(os.tmpdir(), 'dsh-reminder-notify-tray.log'),
+  ]
+  try {
+    trayChild = spawn(settings.powershellPath, argv, {
+      cwd: PACKAGE_ROOT,
+      detached: false,
+      stdio: 'ignore',
+      windowsHide: true,
+    })
+    trayChild.on('error', () => {})
+    trayChild.on('exit', () => {
+      trayChild = null
+    })
+    trayChild.unref()
+  } catch {
+    trayChild = null
+  }
+  return trayStatusOf(settings)
+}
+
+function stopTray(settings) {
+  try {
+    if (trayChild !== null) {
+      trayChild.kill()
+      trayChild = null
+    }
+  } catch {
+    /* 已经退出就算了 */
+  }
+  return trayStatusOf(settings)
+}
+
+// ---- 条件提醒 ----
+export function parseCondState(raw) {
+  if (typeof raw !== 'string' || raw.trim() === '') return {}
+  try {
+    const parsed = JSON.parse(raw)
+    return parsed !== null && typeof parsed === 'object' ? parsed : {}
+  } catch {
+    return {}
+  }
+}
+
+/**
+ * 条件提醒判定（纯函数）：返回「现在该弹」的规则列表，空数组表示不弹。
+ * snapshot: { balance, queueLength, hostFailures, todayCount }
+ */
+export function evaluateConditions(settings, snapshot = {}, now = new Date()) {
+  if (settings?.conditionsEnabled === false) return []
+  const state = parseCondState(settings?.condState)
+  const cooldownMs = Math.max(0, num(settings?.condCooldownMinutes, 120)) * 60 * 1000
+  const stamp = now.getTime()
+  const cooled = (id) => {
+    if (cooldownMs === 0) return true
+    const at = num(state?.[id]?.at, 0)
+    return at === 0 || stamp - at >= cooldownMs
+  }
+  const fired = []
+
+  if (settings?.condBalanceBelow === true && settings?.balanceEnabled === true) {
+    const balance = num(snapshot.balance, 0)
+    const baseline = num(settings.balanceBaseline, 0)
+    const thresholds = parseThresholds(settings.balanceThresholds)
+    const threshold = thresholds.length > 0 ? Math.min(...thresholds) : 0
+    if (balance > 0 && baseline > 0 && threshold > 0) {
+      const pct = Math.round((balance / baseline) * 1000) / 10
+      if (pct <= threshold && cooled('balance-below')) {
+        fired.push({
+          id: 'balance-below',
+          title: '余额快不够了',
+          message: `DeepSeek 余额 ¥${balance.toFixed(2)}，是基线 ¥${baseline.toFixed(2)} 的 ${pct}%，已经低于 ${threshold}% 预警档。`,
+        })
+      }
+    }
+  }
+
+  const backlog = Math.round(num(settings?.condQueueBacklog, 0))
+  if (backlog > 0 && num(snapshot.queueLength, 0) >= backlog && cooled('queue-backlog')) {
+    fired.push({
+      id: 'queue-backlog',
+      title: '提醒排队变长了',
+      message: `现在有 ${snapshot.queueLength} 条提醒在排队（你设的阈值是 ${backlog} 条），可能是有卡一直没关。`,
+    })
+  }
+
+  const hostLimit = Math.round(num(settings?.condHostFailures, 0))
+  if (hostLimit > 0 && num(snapshot.hostFailures, 0) >= hostLimit && cooled('host-failures')) {
+    fired.push({
+      id: 'host-failures',
+      title: '卡片老是弹不出来',
+      message: `提醒宿主连续失败了 ${snapshot.hostFailures} 次。打开「插件 → 桌面提醒 → 高级 → 运行自检」看看是哪一项。`,
+    })
+  }
+
+  const today = todayKey(now)
+  if (settings?.condQuietEnter === true && inQuietHours(settings, now) && state?.['quiet-enter']?.date !== today) {
+    fired.push({
+      id: 'quiet-enter',
+      title: '进入免打扰时段',
+      message: `现在是 ${settings.quietStart}–${settings.quietEnd} 免打扰，这段时间的提醒会${settings.quietMode === 'skip' ? '直接丢掉' : '等时段结束再补弹'}。`,
+      date: today,
+    })
+  }
+
+  const dailyLimit = Math.round(num(settings?.condDailyCount, 0))
+  if (dailyLimit > 0 && num(snapshot.todayCount, 0) >= dailyLimit && state?.['daily-count']?.date !== today) {
+    fired.push({
+      id: 'daily-count',
+      title: '今天的提醒有点多',
+      message: `今天已经弹了 ${snapshot.todayCount} 条提醒，超过你设的 ${dailyLimit} 条。`,
+      date: today,
+    })
+  }
+
+  return fired
+}
+
+/** 把刚触发的条件写回 condState（JSON 字符串）。 */
+export function condStateAfter(settings, fired, now = new Date()) {
+  const state = parseCondState(settings?.condState)
+  const stamp = now.getTime()
+  for (const item of fired) {
+    const previousDate = state?.[item.id]?.date ?? ''
+    state[item.id] = { at: stamp, date: item.date ?? previousDate }
+  }
+  return JSON.stringify(state)
+}
+
+export function conditionSnapshotOf(settings, now = new Date()) {
+  const entries = readHistory(settings)
+  const today = todayKey(now)
+  return {
+    balance: num(balanceState.balance, 0),
+    queueLength: queue.length + (active !== null ? 1 : 0),
+    hostFailures: num(hostHealth.failureCount, 0),
+    todayCount: entries.filter((entry) => dayKeyOf(num(entry?.at, 0)) === today).length,
+  }
+}
+
+function registerConditionLoop(ctx, getSettings) {
+  let running = false
+  const tick = async () => {
+    if (running) return
+    const settings = getSettings()
+    if (settings.conditionsEnabled === false) return
+    running = true
+    try {
+      const now = new Date()
+      const fired = evaluateConditions(settings, conditionSnapshotOf(settings, now), now)
+      if (fired.length === 0) return
+      await saveBalanceState(ctx, { condState: condStateAfter(settings, fired, now) })
+      for (const item of fired) {
+        await notify('raw', { title: item.title, message: item.message, seconds: 40 }, getSettings()).catch(() => {})
+      }
+    } catch {
+      /* 条件判定出错不影响下一轮 */
+    } finally {
+      running = false
+    }
+  }
+  const timer = setInterval(() => {
+    void tick()
+  }, 60 * 1000)
+  if (typeof timer?.unref === 'function') timer.unref()
+  ctx.effect(() => () => clearInterval(timer), 'dsh-reminder-notify: condition watcher')
+}
+
+function registerTrayRoute(ctx, getSettings) {
+  const web = typeof ctx.get === 'function' ? ctx.get('webServer') : undefined
+  if (web === undefined || web === null || typeof web.register !== 'function') {
+    ctx.logger?.warn?.('dsh-reminder-notify: webServer is unavailable, the tray panel stays hidden')
+    return
+  }
+  const reply = (res, status, payload) => {
+    res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+    res.end(JSON.stringify(payload))
+  }
+  const route = {
+    kind: 'exact',
+    path: TRAY_ROUTE,
+    handler: async (req, res) => {
+      try {
+        const settings = getSettings()
+        const method = (req.method ?? 'GET').toUpperCase()
+        if (method === 'GET') return reply(res, 200, { ok: true, tray: trayStatusOf(settings) })
+        if (method !== 'POST') return reply(res, 405, { ok: false, error: 'use GET or POST' })
+        const body = await readJsonBody(req)
+        const action = str(body?.action, 'status')
+        if (action === 'start') return reply(res, 200, { ok: true, action, tray: startTray(settings) })
+        if (action === 'stop') return reply(res, 200, { ok: true, action, tray: stopTray(settings) })
+        if (action === 'mute' || action === 'quiet') {
+          const value = body?.value === true
+          const state = writeTrayState(settings, action === 'mute' ? { muted: value } : { quiet: value })
+          return reply(res, 200, { ok: true, action, state, tray: trayStatusOf(settings) })
+        }
+        if (action === 'toast') {
+          const sent = sendToast(settings, toastArgsOf(settings, 'raw', '原生通知自检', '能看到这条系统通知，就说明原生通知能用。'))
+          return reply(res, 200, { ok: true, action, sent })
+        }
+        return reply(res, 200, { ok: true, action, tray: trayStatusOf(settings) })
+      } catch (error) {
+        return reply(res, 500, { ok: false, error: String(error?.message ?? error) })
+      }
+    },
+  }
+  ctx.effect(() => {
+    const dispose = web.register(route)
+    return () => {
+      if (typeof dispose === 'function') dispose()
+    }
+  }, 'dsh-reminder-notify: tray route')
+}
+
 function packageVersion() {
   try {
     return JSON.parse(fs.readFileSync(path.join(PACKAGE_ROOT, 'package.json'), 'utf8')).version
@@ -2115,11 +2464,18 @@ export function apply(ctx, config) {
   registerExportRoute(ctx, () => settingsOf(config))
   registerDigestRoute(ctx, () => settingsOf(config))
   registerDigestLoop(ctx, () => settingsOf(config))
+  registerConditionLoop(ctx, () => settingsOf(config))
+  registerTrayRoute(ctx, () => settingsOf(config))
   registerDoctorRoute(ctx, () => settingsOf(config))
   const tools = typeof ctx.get === 'function' ? ctx.get('tools') : ctx.tools
   if (tools === undefined || tools === null || typeof tools.register !== 'function') {
     ctx.logger?.warn?.('dsh-reminder-notify: tools service is unavailable, notify_user was not registered')
     return
+  }
+  // 托盘：打开了就随插件一起起来；插件卸载时一并收掉。
+  if (settingsOf(config).trayEnabled === true) {
+    startTray(settingsOf(config))
+    ctx.effect(() => () => stopTray(settingsOf(config)), 'dsh-reminder-notify: tray host')
   }
   const definition = toolDefinition(() => settingsOf(config), ctx)
   const dispose = tools.register(definition)

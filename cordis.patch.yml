@@ -99,3 +99,27 @@
         # 单卡最长停留秒数（0 = 不额外限制）
         maxHoldSeconds: 0
         retryHostOnce: true
+        # 条件提醒：满足条件就主动弹一张卡（不用等模型调用）
+        conditionsEnabled: true
+        # 余额跌破「余额提醒」里的百分比阈值时弹一张
+        condBalanceBelow: true
+        # 排队积压超过几条时弹一张（0 = 关）
+        condQueueBacklog: 0
+        # 宿主画不出卡片累计几次时弹一张（0 = 关）
+        condHostFailures: 0
+        # 每天进入免打扰时弹一张
+        condQuietEnter: false
+        # 当天提醒条数超过几条时弹一张（0 = 关）
+        condDailyCount: 0
+        # 同一条条件的最小提醒间隔（分钟）
+        condCooldownMinutes: 120
+        # 内部状态：各条件上次提醒时间 / 日期
+        condState: ''
+        # 卡片弹出的同时再发一条 Windows 系统通知
+        toastEnabled: false
+        toastSeconds: 8
+        # 托盘图标 + 全局热键
+        trayEnabled: false
+        trayHotkey: Ctrl+Alt+R
+        # 托盘状态文件（留空 = 用户目录下 .dsh/dsh-reminder-notify/tray.json）
+        trayStateFile: ''

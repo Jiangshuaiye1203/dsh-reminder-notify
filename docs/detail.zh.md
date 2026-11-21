@@ -13,3 +13,4 @@
 - **给别的插件用**：本插件对外提供 `reminder` 服务（`notify` / `digest` / `stats` / `config`），写法见 README。
 - 自检里新增「GitHub 连通性」：hosts 里有指向 127.0.0.1 的 github 行（Steam++ 加速表）时标红，另有「测 GitHub」按钮现测一次；推送用 `scripts/github-push.ps1` 可自动处理并还原。
 - 0.17 新增：定时提醒（`at` / `inMinutes`）、`decide` 优先、单卡最长停留、卡上「打开链接」按钮与 Enter/S/Esc 快捷键、历史导出 CSV/JSON、Telegram/飞书/钉钉推送格式、服务契约第 2 版。
+- 0.18 新增：条件提醒（余额 / 排队 / 宿主失败 / 免打扰 / 条数，各自可关）、原生系统通知（`toastEnabled`）、托盘图标与全局热键（`Ctrl+Alt+R`），面板「工程与可靠性：自检」里可启停托盘与试发通知。
