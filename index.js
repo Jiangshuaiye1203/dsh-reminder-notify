@@ -969,7 +969,7 @@ async function showItem(item) {
     if (hit !== undefined) pickMinutes = hit.minutes
   }
       if (parsed.focusAssist === true) focusAssist = true
-      if (action === 'pick' && pickMinutes > 0) {
+      if (parsed.action === 'pick' && pickMinutes > 0) {
     const waitMs = pickMinutes * 60 * 1000
     const timer = setTimeout(() => {
       queue.unshift({ ...item, snoozed: true, count: 1, holdUntil: 0, pickTimes: item.pickTimes })
