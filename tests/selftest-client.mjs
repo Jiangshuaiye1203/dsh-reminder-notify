@@ -231,6 +231,9 @@ try {
     assert.match(pageText, /备份与恢复/, '0.33 备份块标题没渲染')
     assert.match(pageText, /备份一次/, '0.33 备份按钮没渲染')
     assert.match(pageText, /导入配置/, '0.33 导入按钮没渲染')
+    assert.match(pageText, /自定义规则/, '0.36 规则块标题没渲染')
+    assert.match(pageText, /响应速度/, '0.36 响应速度行没渲染')
+    assert.match(pageText, /规则 = 什么时候|when to fire/, '0.36 规则块说明没渲染')
     const basicGroup = findAll(tree, (node) => node.props && node.props.className === 'drn-group')[0]
     assert.ok(basicGroup, '没有找到基本组')
     const basicText = collectText(basicGroup)
