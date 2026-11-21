@@ -48,8 +48,8 @@
       },
       "versions": [
         {
-          "version": "0.28.0",
-          "publishTimestamp": 1795253620,
+          "version": "0.28.1",
+          "publishTimestamp": 1795253841,
           "source": {
             "type": "npm"
           },
