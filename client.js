@@ -1791,7 +1791,7 @@ const BACKUP_ROUTE = '/dsh-reminder-notify/backup'
       }
 
       // 一张分组卡片。allowed 有值时只渲染其中的键（用于把 digest 组拆成「常用」与「高级」两半）。
-      const groupCard = (group, allowed, withExtras) => {
+      const groupCard = (group, allowed, withExtras, firstRow) => {
         const rows = FIELDS.filter(
           (field) => field.group === group && (allowed === undefined || allowed.includes(field.key)),
         ).map((field) =>
@@ -2021,7 +2021,7 @@ const BACKUP_ROUTE = '/dsh-reminder-notify/backup'
           'div',
           { className: 'drn-group', key: group },
           h('div', { className: 'drn-group-title' }, typeof t === 'function' ? t(GROUP_LABELS[group]) : group),
-          rows,
+          firstRow ? [firstRow].concat(rows) : rows,
         )
       }
 
@@ -2066,8 +2066,9 @@ const BACKUP_ROUTE = '/dsh-reminder-notify/backup'
           h('div', { className: 'drn-fold-body', style: open ? undefined : { display: 'none' } }, children),
         )
       }
-      const common = [
-        groupCard('basic'),
+      // 延后到渲染时再拼：tryRow 在下面才定义（const 有 TDZ），这里先留一个工厂。
+      const commonOf = () => [
+        groupCard('basic', undefined, true, tryRow),
         foldOf('digest', 'groupDigest', [groupCard('digest', COMMON_DIGEST, true)]),
       ]
 
@@ -2560,8 +2561,7 @@ const BACKUP_ROUTE = '/dsh-reminder-notify/backup'
           h('div', { className: 'drn-head-intro' }, typeof t === 'function' ? t(writable ? 'intro' : 'readonly') : ''),
           h('div', { className: 'drn-summary' }, summaryText()),
         ),
-        tryRow,
-        common,
+        commonOf(),
         advanced,
         h(
           'div',
