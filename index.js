@@ -12,6 +12,7 @@
 import { spawn } from 'node:child_process'
 import fs from 'node:fs'
 import https from 'node:https'
+import net from 'node:net'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -1826,6 +1827,34 @@ export function probeGithub(timeoutMs = 8000) {
   })
 }
 
+/** 只看端口有没有人接（不做 TLS）：Steam++ 接管时 TLS 由它处理，Node 校验证书会失败。 */
+export function probeTcp(host, port, timeoutMs = 1500) {
+  const started = Date.now()
+  return new Promise((resolve) => {
+    let settled = false
+    const done = (payload) => {
+      if (settled) return
+      settled = true
+      resolve({ ...payload, ms: Date.now() - started })
+    }
+    try {
+      const socket = net.connect({ host, port })
+      socket.setTimeout(timeoutMs)
+      socket.once('connect', () => {
+        socket.destroy()
+        done({ ok: true })
+      })
+      socket.once('timeout', () => {
+        socket.destroy()
+        done({ ok: false, error: `timeout ${timeoutMs}ms` })
+      })
+      socket.once('error', (error) => done({ ok: false, error: String(error?.message ?? error) }))
+    } catch (error) {
+      done({ ok: false, error: String(error?.message ?? error) })
+    }
+  })
+}
+
 /**
  * 0.17.4：hosts 指向 127.0.0.1 不等于连不上——Steam++（Watt Toolkit）加速时，
  * 它的本地代理就接在 127.0.0.1 上。所以真连一次再定结论：能通就是绿，连不上才红。
@@ -1840,9 +1869,17 @@ async function withGithubProbe(report) {
     item.ok = true
     item.detail = `hosts 指向 127.0.0.1，加速器已接管（HTTP ${probe.statusCode ?? 0} · ${probe.ms}ms）`
     report.ok = checks.every((check) => check.ok !== false)
-  } else {
-    item.detail = `${item.detail}；现测失败：${probe.error ?? 'HTTP ' + String(probe.statusCode ?? 0)}`
+    return report
   }
+  // 加速器接管时 Node 往往校验证书失败（TLS 由它中转），退一步只看本地端口有没有人接。
+  const tcp = await probeTcp('127.0.0.1', 443)
+  if (tcp.ok) {
+    item.ok = true
+    item.detail = 'hosts 指向 127.0.0.1，加速器本地代理在监听 443（TLS 由加速器转发，浏览器可用）'
+    report.ok = checks.every((check) => check.ok !== false)
+    return report
+  }
+  item.detail = `${item.detail}；现测失败：${probe.error ?? 'HTTP ' + String(probe.statusCode ?? 0)}`
   return report
 }
 
