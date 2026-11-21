@@ -497,6 +497,7 @@ function argvOfScriptHost(o) {
   if (o.openUrl) argv.push('-OpenUrl', String(o.openUrl))
   if (o.replyEnabled) argv.push('-Reply')
   if (o.customButtons) argv.push('-CustomButtons', String(o.customButtons))
+  if (o.choices) argv.push('-Choices', String(o.choices))
   if (o.focusAssistMute) argv.push('-RespectFocus')
   return argv
 }
@@ -741,6 +742,24 @@ function pump() {
     })
 }
 
+// 0.28：决定卡直接给候选按钮。模型传 options: ['A', 'B']，用户点哪个就回哪个。
+export function normalizeChoices(input) {
+  if (!Array.isArray(input)) return []
+  const out = []
+  for (const raw of input) {
+    const label = str(typeof raw === 'string' ? raw : raw?.label, '').replace(/\|/g, '/').trim()
+    if (label === '') continue
+    out.push(label.slice(0, 12))
+    if (out.length >= 4) break
+  }
+  return out
+}
+
+export function choicesArgOf(item) {
+  const list = normalizeChoices(item?.options)
+  return list.length >= 2 ? list.join('|') : ''
+}
+
 async function showItem(item) {
   const settings = item.settings
   const scriptPath = path.resolve(settings.scriptPath)
@@ -771,6 +790,7 @@ async function showItem(item) {
     buttonsEnabled: settings.buttonsEnabled,
     replyEnabled: settings.replyEnabled,
     customButtons: customButtonsOf(settings, item),
+    choices: choicesArgOf(item),
     focusAssistMute: settings.focusAssistMute,
     snoozeMinutes: settings.snoozeMinutes,
     autoCompact: settings.compactOnFullscreen,
@@ -781,6 +801,7 @@ async function showItem(item) {
   let hostError
   let replyText = ''
   let buttonLabel = ''
+  let choiceText = ''
   let focusAssist = false
   try {
     const { exited } = await launch(settings.powershellPath, argv, PACKAGE_ROOT)
@@ -795,6 +816,7 @@ async function showItem(item) {
       action = parsed.action
       if (typeof parsed.reply === 'string') replyText = parsed.reply.trim()
       if (typeof parsed.button === 'string') buttonLabel = parsed.button.trim()
+      if (typeof parsed.choice === 'string') choiceText = parsed.choice.trim()
       if (parsed.focusAssist === true) focusAssist = true
       if (action === 'snooze') {
         const minutes = Math.round(clamp(num(parsed.snooze, settings.snoozeMinutes), 1, 240))
@@ -843,6 +865,7 @@ async function showItem(item) {
     quiet: item.quiet === true,
     ...(replyText !== '' ? { reply: replyText } : {}),
     ...(buttonLabel !== '' ? { button: buttonLabel } : {}),
+    ...(choiceText !== '' ? { choice: choiceText } : {}),
     ...(focusAssist ? { focusAssist: true } : {}),
   })
   // 0.20：用户在卡上回话 → 记一条服务事件，并按开关推到手机（fire-and-forget）
@@ -852,6 +875,9 @@ async function showItem(item) {
       const pushed = pushOut(settings, `回复：${item.title}`, replyText, { kind: 'reply', time: new Date().toISOString() })
       if (pushed !== null && typeof pushed.catch === 'function') pushed.catch(() => {})
     }
+  }
+  if (action === 'choice' && choiceText !== '') {
+    emitServiceEvent('chosen', { kind: item.kind, title: item.title, choice: choiceText })
   }
   if (action === 'custom' && buttonLabel !== '') {
     emitServiceEvent('button', { kind: item.kind, title: item.title, button: buttonLabel })
@@ -1001,6 +1027,7 @@ async function notify(kind, args, settings) {
     seconds,
     url: openUrl,
     buttons: Array.isArray(args.buttons) ? args.buttons.slice(0, 3) : undefined,
+    options: normalizeChoices(args.options),
     dueAt,
     priority: priorityOf(kind),
     sound: sound && audioPath !== '',
@@ -1099,6 +1126,12 @@ const parameters = {
         required: ['label'],
         additionalProperties: false,
       },
+    },
+    options: {
+      type: 'array',
+      description:
+        '决定卡上的候选按钮（2–4 个，每个最多 12 个字）。用户点了哪一个，就会记进历史并出现在你下一步的上下文里。只对 kind=decide 有意义。',
+      items: { type: 'string' },
     },
   },
 }
@@ -2753,6 +2786,32 @@ export function resetPhoneSeen(now = Date.now()) {
   phoneSeenAt = now
 }
 
+// 0.28：决定卡的候选按钮点了哪个，也要让模型自己看到。
+let choiceSeenAt = Date.now()
+
+export function unreadChoices(settings, since = 0, limit = 5) {
+  return readHistory(settings)
+    .filter((entry) => entry.action === 'choice' && str(entry.choice, '') !== '' && Number(entry.at ?? 0) > since)
+    .slice(-limit)
+}
+
+export function choicePromptText(settings, now = Date.now()) {
+  const fresh = unreadChoices(settings, choiceSeenAt)
+  if (fresh.length === 0) return ''
+  choiceSeenAt = now
+  const lines = fresh.map((entry) => {
+    const at = new Date(Number(entry.at ?? now))
+    const hh = String(at.getHours()).padStart(2, '0')
+    const mm = String(at.getMinutes()).padStart(2, '0')
+    return `- ${hh}:${mm} 「${str(entry.title, '')}」选了：${str(entry.choice, '')}`
+  })
+  return `用户在提醒卡上点了选项（${fresh.length} 条，按这个走就行，不用再确认）：\n${lines.join('\n')}`
+}
+
+export function resetChoiceSeen(now = Date.now()) {
+  choiceSeenAt = now
+}
+
 function registerMobileAssets(ctx, getSettings) {
   const reply = (res, status, body, type = 'application/json; charset=utf-8') => {
     res.writeHead(status, { 'content-type': type, 'cache-control': 'no-store' })
@@ -3573,6 +3632,15 @@ export function apply(ctx, config) {
           text: () => phonePromptText(settingsOf(config)),
         }),
       'dsh-reminder-notify: phone replies prompt',
+    )
+    ctx.effect(
+      () =>
+        promptService.context({
+          name: 'dsh-reminder-notify:card-choices',
+          order: 881,
+          text: () => choicePromptText(settingsOf(config)),
+        }),
+      'dsh-reminder-notify: card choices prompt',
     )
   }
   registerDoctorRoute(ctx, () => settingsOf(config))

@@ -390,6 +390,8 @@ const EXPORT_ROUTE = '/dsh-reminder-notify/export'
       pushReplyHint: '你在卡片上回的话，也按上面的推送地址发到手机。',
       historyActionReplied: '卡片回话',
       historyActionCustom: '点了自定义按钮',
+      historyActionChoice: '选了候选项',
+      historyChoicePrefix: '选了：',
       historyReplyPrefix: '回复：',
       historyAttachPrefix: '附件 ',
       historyButtonPrefix: '按钮：',
@@ -609,6 +611,8 @@ const EXPORT_ROUTE = '/dsh-reminder-notify/export'
       pushReplyHint: 'Also push the lines you type on the card to your phone.',
       historyActionReplied: 'replied',
       historyActionCustom: 'custom button',
+      historyActionChoice: 'picked an option',
+      historyChoicePrefix: 'picked: ',
       historyReplyPrefix: 'reply: ',
       historyAttachPrefix: 'files ',
       historyButtonPrefix: 'button: ',
@@ -1548,11 +1552,13 @@ const EXPORT_ROUTE = '/dsh-reminder-notify/export'
           'quiet-skip': 'historyActionQuietSkip',
           replied: 'historyActionReplied',
           custom: 'historyActionCustom',
+          choice: 'historyActionChoice',
         }
         const head = [shortTime(entry.at), label(kinds[entry.kind] || 'historyKindRaw'), label(actions[entry.action] || entry.action)]
         if (entry.count > 1) head.push('×' + entry.count)
         if (String(entry.reply || '') !== '') head.push(label('historyReplyPrefix') + String(entry.reply).slice(0, 40))
         if (String(entry.button || '') !== '') head.push(label('historyButtonPrefix') + String(entry.button).slice(0, 16))
+        if (String(entry.choice || '') !== '') head.push(label('historyChoicePrefix') + String(entry.choice).slice(0, 16))
         if (Array.isArray(entry.attachments) && entry.attachments.length > 0) head.push(label('historyAttachPrefix') + entry.attachments.length)
         const text = String(entry.message || '').replace(/\s+/g, ' ').slice(0, 46)
         if (text !== '') head.push(text)

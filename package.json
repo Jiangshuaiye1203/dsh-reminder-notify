@@ -1,6 +1,6 @@
 {
   "name": "dsh-reminder-notify",
-  "version": "0.27.0",
+  "version": "0.28.0",
   "description": "DSH 桌面提醒插件：把「完成/需要决定」提醒变成 notify_user 工具（浮动卡片 + 提示音，不抢焦点，纯 PowerShell 源码宿主，仓库零 exe）",
   "author": "Jiangshuaiye1203",
   "type": "module",

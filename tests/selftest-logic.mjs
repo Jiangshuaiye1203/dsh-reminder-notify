@@ -3,7 +3,7 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { mobileProxyPathOk, httpsLinkOf, mobileBarsOf, mobileCsvOf, mobileSettingsPatch, mobileViewOf, attachmentSummaryOf, mobileAttachmentsOf, uploadNameFor, condStateAfter, customButtonsOf, customButtonsSpec, escapeHtml, mobileLinkOf, mobilePageOf, phonePromptText, repliesOf, resetPhoneSeen, unreadPhoneReplies, digestDue, digestMessage, doctorReport, evaluateConditions, historyStats, inQuietHours, nextRunAfter, parseClock, parseCustomButtons, parseEvery, pushPayload, quietEndAt, todayKey, toastArgsOf } from '../index.js'
+import { mobileProxyPathOk, httpsLinkOf, mobileBarsOf, mobileCsvOf, mobileSettingsPatch, mobileViewOf, attachmentSummaryOf, mobileAttachmentsOf, uploadNameFor, condStateAfter, choicePromptText, choicesArgOf, normalizeChoices, resetChoiceSeen, unreadChoices, customButtonsOf, customButtonsSpec, escapeHtml, mobileLinkOf, mobilePageOf, phonePromptText, repliesOf, resetPhoneSeen, unreadPhoneReplies, digestDue, digestMessage, doctorReport, evaluateConditions, historyStats, inQuietHours, nextRunAfter, parseClock, parseCustomButtons, parseEvery, pushPayload, quietEndAt, todayKey, toastArgsOf } from '../index.js'
 
 let failed = 0
 function check(label, actual, expected) {
@@ -250,6 +250,36 @@ check('mobileAttachmentsOf 只收上传目录里的', mobileAttachmentsOf([{ nam
 check('mobileAttachmentsOf 拦目录外文件', mobileAttachmentsOf([{ name: 'x.png', file: outside }], uploadRoot), [])
 check('mobileAttachmentsOf 最多三个', mobileAttachmentsOf([inside, inside, inside, inside].map((file) => ({ name: 'ok.png', file })), uploadRoot).length, 3)
 check('mobileAttachmentsOf 读出文件大小', mobileAttachmentsOf([{ name: 'ok.png', file: inside }], uploadRoot)[0].size, 3)
+
+// —— 决定卡候选按钮（0.28） ——
+check('normalizeChoices 收字符串', normalizeChoices(['拆分任务', '一次做完']), ['拆分任务', '一次做完'])
+check('normalizeChoices 收对象', normalizeChoices([{ label: '选 A' }, { label: '选 B' }]), ['选 A', '选 B'])
+check('normalizeChoices 最多四个', normalizeChoices(['1', '2', '3', '4', '5']).length, 4)
+check('normalizeChoices 去掉竖线', normalizeChoices(['a|b']), ['a/b'])
+check('normalizeChoices 截断到 12 字', normalizeChoices(['一二三四五六七八九十十一十二十三'])[0].length, 12)
+check('normalizeChoices 空值返回空', normalizeChoices(undefined), [])
+check('choicesArgOf 两个以上才给宿主', choicesArgOf({ options: ['A', 'B'] }), 'A|B')
+check('choicesArgOf 只有一个不给', choicesArgOf({ options: ['A'] }), '')
+
+const choiceHistory = path.join(os.tmpdir(), `drn-choice-test-${process.pid}.json`)
+fs.writeFileSync(
+  choiceHistory,
+  JSON.stringify([
+    { at: nowMs - 50000, kind: 'decide', title: '下一步做哪个', message: '', action: 'choice', choice: '选 A：拆分任务' },
+    { at: nowMs - 40000, kind: 'decide', title: '另一个决定', message: '', action: 'timeout' },
+    { at: nowMs - 30000, kind: 'raw', title: '普通', message: '', action: 'choice', choice: '' },
+  ]),
+)
+const choiceSettings = { historyFile: choiceHistory }
+resetChoiceSeen(0)
+check('unreadChoices 只算有选择的条目', unreadChoices(choiceSettings, 0).length, 1)
+resetChoiceSeen(0)
+const choicePrompt = choicePromptText(choiceSettings, nowMs + 1000)
+check('choicePromptText 带选择原文', choicePrompt.includes('选了：选 A：拆分任务'), true)
+check('choicePromptText 第二次为空', choicePromptText(choiceSettings, nowMs + 2000), '')
+resetChoiceSeen(nowMs + 3000)
+check('resetChoiceSeen 之后不再提醒', choicePromptText(choiceSettings, nowMs + 4000), '')
+
 const phonePage = mobilePageOf({ mobileToken: 'k' }, [], new Date(2026, 10, 21, 9, 0, 0))
 check('页面有拍照入口', phonePage.includes('拍照 / 选图'), true)
 check('页面有录音入口', phonePage.includes('录一段话'), true)

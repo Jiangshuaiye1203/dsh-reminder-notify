@@ -39,6 +39,7 @@ param(
     [string]$OpenUrl = '',
     [switch]$Reply,
     [string]$CustomButtons = '',
+    [string]$Choices = '',
     [switch]$RespectFocus,
     [switch]$Compact,
     [switch]$AutoCompact,
@@ -209,6 +210,18 @@ if ($showButtons -and -not [string]::IsNullOrWhiteSpace($CustomButtons)) {
         if ($customList.Count -ge 3) { break }
     }
 }
+
+# ---- 决定卡的候选项（A|B|C，最多 4 个） -------------------------------------
+$choiceList = New-Object System.Collections.ArrayList
+if ($showButtons -and -not [string]::IsNullOrWhiteSpace($Choices)) {
+    foreach ($chunk in ($Choices -split '\|')) {
+        $label = $chunk.Trim()
+        if ($label -eq '') { continue }
+        if ($label.Length -gt 12) { $label = $label.Substring(0, 12) }
+        [void]$choiceList.Add($label)
+        if ($choiceList.Count -ge 4) { break }
+    }
+}
 $showReply = ($Reply -and $showButtons)
 
 $titleSize = 11.5
@@ -269,16 +282,22 @@ foreach ($item in $customList) {
     $sz = $measureGfx.MeasureString($item.label, $btnFont)
     $customWidths += ([int][Math]::Ceiling($sz.Width) + 20)
 }
+$choiceWidths = @()
+foreach ($choiceLabel in $choiceList) {
+    $sz = $measureGfx.MeasureString($choiceLabel, $btnFont)
+    $choiceWidths += ([int][Math]::Ceiling($sz.Width) + 20)
+}
 $measureGfx.Dispose()
 $measureBmp.Dispose()
 
 $headerHeight = [int][Math]::Ceiling($titleSizeF.Height)
 $bodyHeight = [int][Math]::Ceiling($bodySizeF.Height)
 $hintHeight = 16
+$choiceRowHeight = if ($showButtons -and $choiceList.Count -gt 0) { $buttonHeight + 6 } else { 0 }
 $customRowHeight = if ($showButtons -and $customList.Count -gt 0) { $buttonHeight + 6 } else { 0 }
 $replyHeight = if ($showReply) { 30 + 6 } else { 0 }
 $buttonsHeight = if ($showButtons) { $buttonHeight + 10 } else { 0 }
-$height = $padX + $headerHeight + $(if ($bodyHeight -gt 0) { 4 + $bodyHeight } else { 0 }) + 6 + $hintHeight + $replyHeight + $customRowHeight + $buttonsHeight + $padX
+$height = $padX + $headerHeight + $(if ($bodyHeight -gt 0) { 4 + $bodyHeight } else { 0 }) + 6 + $hintHeight + $replyHeight + $choiceRowHeight + $customRowHeight + $buttonsHeight + $padX
 if ($height -lt 96) { $height = 96 }
 if ($height -gt 380) { $height = 380 }
 
@@ -307,6 +326,19 @@ if ($showButtons) {
             $r = New-Object System.Drawing.Rectangle $cx, $cy, $w, $buttonHeight
             $script:customRects += ,@($r, $i)
             $cx = $cx + $w + 6
+        }
+    }
+    $script:choiceRects = @()
+    if ($choiceList.Count -gt 0) {
+        $hx = $accentWidth + $padX
+        $hy = $btnTop - $buttonHeight - 6
+        if ($customList.Count -gt 0) { $hy = $hy - $buttonHeight - 6 }
+        for ($i = 0; $i -lt $choiceList.Count; $i++) {
+            $w = $choiceWidths[$i]
+            if (($hx + $w) -gt ($width - $padX)) { break }
+            $r = New-Object System.Drawing.Rectangle $hx, $hy, $w, $buttonHeight
+            $script:choiceRects += ,@($r, $i)
+            $hx = $hx + $w + 6
         }
     }
 }
@@ -354,6 +386,7 @@ $form.Region = New-Object System.Drawing.Region $path
 $script:replyBox = $null
 $script:replyRect = $null
 $script:replyText = ''
+$script:choiceLabel = ''
 if ($showReply) {
     $boxTop = $height - $padX - $buttonsHeight - 6 - $customRowHeight - 26
     $boxWidth = $width - $accentWidth - $padX - $padX
@@ -493,6 +526,31 @@ $form.Add_Paint({
         $labelBrush.Dispose()
         $fmt.Dispose()
     }
+
+    # 决定卡候选项
+    foreach ($pair in $script:choiceRects) {
+        $rect = $pair[0]
+        $idx = $pair[1]
+        $fill = if ($script:hover -eq ('h' + $idx)) { $btnHoverColor } else { $accentColor }
+        $btnPath = New-Object System.Drawing.Drawing2D.GraphicsPath
+        $r2 = 8
+        $btnPath.AddArc($rect.X, $rect.Y, $r2 * 2, $r2 * 2, 180, 90)
+        $btnPath.AddArc($rect.Right - $r2 * 2, $rect.Y, $r2 * 2, $r2 * 2, 270, 90)
+        $btnPath.AddArc($rect.Right - $r2 * 2, $rect.Bottom - $r2 * 2, $r2 * 2, $r2 * 2, 0, 90)
+        $btnPath.AddArc($rect.X, $rect.Bottom - $r2 * 2, $r2 * 2, $r2 * 2, 90, 90)
+        $btnPath.CloseFigure()
+        $btnBrush = New-Object System.Drawing.SolidBrush $fill
+        $g.FillPath($btnBrush, $btnPath)
+        $btnBrush.Dispose()
+        $btnPath.Dispose()
+        $fmt = New-Object System.Drawing.StringFormat
+        $fmt.Alignment = [System.Drawing.StringAlignment]::Center
+        $fmt.LineAlignment = [System.Drawing.StringAlignment]::Center
+        $labelBrush = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::White)
+        $g.DrawString($choiceList[$idx], $btnFont, $labelBrush, (New-Object System.Drawing.RectangleF $rect.X, $rect.Y, $rect.Width, $rect.Height), $fmt)
+        $labelBrush.Dispose()
+        $fmt.Dispose()
+    }
 })
 
 # ---- 淡入 / 停留 / 淡出 ------------------------------------------------------
@@ -567,6 +625,15 @@ $form.Add_MouseDown({
         return
     }
 
+    # 决定卡候选项（点了就当作「选它」）
+    foreach ($pair in $script:choiceRects) {
+        if ($pair[0].Contains($e.X, $e.Y)) {
+            $script:choiceLabel = $choiceList[$pair[1]]
+            Close-With 'choice'
+            return
+        }
+    }
+
     # 自定义按钮
     foreach ($pair in $script:customRects) {
         $rect = $pair[0]
@@ -614,6 +681,9 @@ $form.Add_MouseMove({
     }
     foreach ($pair in $script:customRects) {
         if ($pair[0].Contains($e.X, $e.Y)) { $next = ('c' + $pair[1]) }
+    }
+    foreach ($pair in $script:choiceRects) {
+        if ($pair[0].Contains($e.X, $e.Y)) { $next = ('h' + $pair[1]) }
     }
     if ($script:replyRect -ne $null -and $script:replyRect.Contains($e.X, $e.Y)) {
         $form.Cursor = [System.Windows.Forms.Cursors]::IBeam
@@ -714,6 +784,7 @@ if (-not [string]::IsNullOrEmpty($ResultPath)) {
             snooze    = $(if ($script:action -eq 'snooze') { [Math]::Max(1, $SnoozeMinutes) } else { 0 })
             reply     = $(if ($script:action -eq 'replied') { $script:replyText } else { '' })
             button    = $(if ($script:action -eq 'custom') { $script:btnLabel } else { '' })
+            choice    = $(if ($script:action -eq 'choice') { $script:choiceLabel } else { '' })
             focusAssist = $script:focusAssist
         }
         $json = ($payload | ConvertTo-Json -Compress)
