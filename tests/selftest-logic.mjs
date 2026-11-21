@@ -1,6 +1,6 @@
 // 纯逻辑自检：不弹窗口、不碰文件，只验证免打扰时段计算和历史统计。
 // 跑法：node tests/selftest-logic.mjs
-import { condStateAfter, customButtonsSpec, digestDue, digestMessage, doctorReport, evaluateConditions, historyStats, inQuietHours, nextRunAfter, parseClock, parseCustomButtons, parseEvery, pushPayload, quietEndAt, todayKey, toastArgsOf } from '../index.js'
+import { condStateAfter, customButtonsOf, customButtonsSpec, repliesOf, digestDue, digestMessage, doctorReport, evaluateConditions, historyStats, inQuietHours, nextRunAfter, parseClock, parseCustomButtons, parseEvery, pushPayload, quietEndAt, todayKey, toastArgsOf } from '../index.js'
 
 let failed = 0
 function check(label, actual, expected) {
@@ -160,6 +160,29 @@ check(
   '打开文档|https://a.example;记一下|',
 )
 check('customButtonsSpec 忽略空标签', customButtonsSpec([{ label: ' ', url: 'x' }]), '')
+
+
+check('customButtonsOf 单条优先于全局', customButtonsOf({ customButtons: '全局|g' }, { buttons: [{ label: '本条', url: 'u' }] }), '本条|u')
+check('customButtonsOf 没有单条就用全局', customButtonsOf({ customButtons: '全局|g;再来|' }, {}), '全局|g;再来|')
+check('customButtonsOf 两边都空', customButtonsOf({ customButtons: '' }, {}), '')
+
+// —— 0.20：卡片回复列表（写一份临时 history） ——
+{
+  const fs = await import('node:fs')
+  const os = await import('node:os')
+  const path = await import('node:path')
+  const file = path.join(os.tmpdir(), `drn-replies-${process.pid}.json`)
+  const entries = [
+    { at: 1, kind: 'raw', title: 'A', message: 'm', action: 'timeout' },
+    { at: 2, kind: 'raw', title: 'B', message: 'm', action: 'replied', reply: '收到，马上改' },
+    { at: 3, kind: 'done', title: 'C', message: 'm', action: 'replied', reply: '好的' },
+  ]
+  fs.writeFileSync(file, JSON.stringify(entries), 'utf8')
+  const list = repliesOf({ historyFile: file }, 20)
+  check('repliesOf 只取 replied 且有正文', list.map((item) => item.reply), ['好的', '收到，马上改'])
+  check('repliesOf limit 生效', repliesOf({ historyFile: file }, 1).length, 1)
+  fs.unlinkSync(file)
+}
 
 check('nextRunAfter 正常加一个周期', nextRunAfter(t0, 30, t0 + 60 * 1000), t0 + 30 * 60 * 1000)
 check('nextRunAfter 跳过错过很多个', nextRunAfter(t0, 30, t0 + 3 * 3600 * 1000), t0 + 210 * 60 * 1000)

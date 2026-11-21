@@ -30,6 +30,8 @@ dsh plugin --profile desktop add link:<本目录绝对路径>
 - **自定义按钮**：`customButtons` 写「标签|网址」，多条分号隔开，最多 3 个；单条提醒也可以带 `buttons: [{ label, url }]`。
 - **专注助手静音**：`focusAssistMute` 打开后，Windows 专注助手 / 演示模式开着时卡片照弹但不响。
 
+- **0.20.1 修了一个漏的**：`notify_user` 的 `buttons` 现在真的会传到卡片（之前只有全局 `customButtons` 生效）。
+
 ## 0.18.1 修了什么
 
 - **面板路由更稳**（0.18.1）：冷启动时 `webServer` 可能比插件晚就绪，路由现在会等它就绪再挂（最多等 60 秒），不再出现「面板一直 404」。

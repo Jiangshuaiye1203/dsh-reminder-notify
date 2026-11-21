@@ -446,7 +446,7 @@ export function customButtonsSpec(list) {
   return parts.join(';')
 }
 
-function customButtonsOf(settings, item) {
+export function customButtonsOf(settings, item) {
   const own = Array.isArray(item?.buttons) ? item.buttons : []
   if (own.length > 0) return customButtonsSpec(own)
   return parseCustomButtons(settings.customButtons).map((one) => `${one.label}|${one.url}`).join(';')
@@ -991,6 +991,7 @@ async function notify(kind, args, settings) {
     message,
     seconds,
     url: openUrl,
+    buttons: Array.isArray(args.buttons) ? args.buttons.slice(0, 3) : undefined,
     dueAt,
     priority: priorityOf(kind),
     sound: sound && audioPath !== '',
