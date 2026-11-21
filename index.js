@@ -121,6 +121,10 @@ export const Config = z === null ? undefined : z.object({
   trayHotkey: z.string().default('Ctrl+Alt+R').description('托盘全局热键，形如 Ctrl+Alt+R').volatile(),
   trayStateFile: z.string().default('').description('托盘静音/免打扰状态文件（留空用 ~/.dsh/dsh-reminder-notify/tray-state.json）').volatile(),
   retryHostOnce: z.boolean().default(true).description('宿主第一次没画出卡片时，自动静音重试一次').volatile(),
+  replyEnabled: z.boolean().default(true).description('卡片上给一个输入框，可以把一句话回给模型').volatile(),
+  customButtons: z.string().default('').description('卡片上的自定义按钮：标签|网址，多条用分号隔开，最多 3 个').volatile(),
+  focusAssistMute: z.boolean().default(true).description('Windows 专注助手 / 演示模式开着时自动静音').volatile(),
+  pushReply: z.boolean().default(true).description('用户在卡片上回话时也推到手机').volatile(),
   dryRun: z.boolean().default(false).description('调试用：只试算参数、不真的弹窗（自检脚本会打开它）').volatile(),
 })
 
@@ -319,6 +323,10 @@ function settingsOf(config) {
     trayHotkey: str(c.trayHotkey, 'Ctrl+Alt+R'),
     trayStateFile: str(c.trayStateFile, ''),
     retryHostOnce: c.retryHostOnce !== false,
+    replyEnabled: c.replyEnabled !== false,
+    customButtons: str(c.customButtons, ''),
+    focusAssistMute: c.focusAssistMute !== false,
+    pushReply: c.pushReply !== false,
     dryRun: c.dryRun === true,
   }
 }
@@ -408,6 +416,42 @@ function launch(file, argv, cwd) {
   })
 }
 
+// 0.20：自定义按钮。配置里是全局的「标签|网址」列表，单条提醒也可以带自己的按钮
+// （notify_user 的 args.buttons: [{label, url}]），两者合并，最多 3 个。
+export function parseCustomButtons(text) {
+  const out = []
+  const raw = String(text ?? '')
+  for (const chunk of raw.split(';')) {
+    const piece = chunk.trim()
+    if (piece === '') continue
+    const at = piece.indexOf('|')
+    const label = (at >= 0 ? piece.slice(0, at) : piece).trim()
+    const url = at >= 0 ? piece.slice(at + 1).trim() : ''
+    if (label === '') continue
+    out.push({ label: label.slice(0, 8), url })
+    if (out.length >= 3) break
+  }
+  return out
+}
+
+export function customButtonsSpec(list) {
+  const parts = []
+  for (const item of Array.isArray(list) ? list : []) {
+    const label = String(item?.label ?? '').trim()
+    if (label === '') continue
+    const url = String(item?.url ?? '').trim()
+    parts.push(`${label.slice(0, 8)}|${url}`)
+    if (parts.length >= 3) break
+  }
+  return parts.join(';')
+}
+
+function customButtonsOf(settings, item) {
+  const own = Array.isArray(item?.buttons) ? item.buttons : []
+  if (own.length > 0) return customButtonsSpec(own)
+  return parseCustomButtons(settings.customButtons).map((one) => `${one.label}|${one.url}`).join(';')
+}
+
 function argvOfScriptHost(o) {
   // 参数用数组逐项传，不拼字符串：中文、空格、括号都不需要转义。
   const argv = [
@@ -442,6 +486,9 @@ function argvOfScriptHost(o) {
   if (o.autoCompact) argv.push('-AutoCompact')
   if (o.queueLeft > 0) argv.push('-QueueLeft', String(o.queueLeft))
   if (o.openUrl) argv.push('-OpenUrl', String(o.openUrl))
+  if (o.replyEnabled) argv.push('-Reply')
+  if (o.customButtons) argv.push('-CustomButtons', String(o.customButtons))
+  if (o.focusAssistMute) argv.push('-RespectFocus')
   return argv
 }
 
@@ -713,6 +760,9 @@ async function showItem(item) {
     resultPath: resultFile,
     openUrl: str(item.url, ''),
     buttonsEnabled: settings.buttonsEnabled,
+    replyEnabled: settings.replyEnabled,
+    customButtons: customButtonsOf(settings, item),
+    focusAssistMute: settings.focusAssistMute,
     snoozeMinutes: settings.snoozeMinutes,
     autoCompact: settings.compactOnFullscreen,
     queueLeft,
@@ -720,6 +770,9 @@ async function showItem(item) {
   let action = 'unknown'
   let exitCode = null
   let hostError
+  let replyText = ''
+  let buttonLabel = ''
+  let focusAssist = false
   try {
     const { exited } = await launch(settings.powershellPath, argv, PACKAGE_ROOT)
     exitCode = await exited
@@ -731,6 +784,9 @@ async function showItem(item) {
     const parsed = JSON.parse(fs.readFileSync(resultFile, 'utf8'))
     if (parsed !== null && typeof parsed === 'object' && typeof parsed.action === 'string') {
       action = parsed.action
+      if (typeof parsed.reply === 'string') replyText = parsed.reply.trim()
+      if (typeof parsed.button === 'string') buttonLabel = parsed.button.trim()
+      if (parsed.focusAssist === true) focusAssist = true
       if (action === 'snooze') {
         const minutes = Math.round(clamp(num(parsed.snooze, settings.snoozeMinutes), 1, 240))
         const timer = setTimeout(() => {
@@ -776,7 +832,21 @@ async function showItem(item) {
     count: item.count ?? 1,
     snoozed: item.snoozed === true,
     quiet: item.quiet === true,
+    ...(replyText !== '' ? { reply: replyText } : {}),
+    ...(buttonLabel !== '' ? { button: buttonLabel } : {}),
+    ...(focusAssist ? { focusAssist: true } : {}),
   })
+  // 0.20：用户在卡上回话 → 记一条服务事件，并按开关推到手机（fire-and-forget）
+  if (action === 'replied' && replyText !== '') {
+    emitServiceEvent('replied', { kind: item.kind, title: item.title, reply: replyText })
+    if (settings.pushEnabled === true && settings.pushReply === true && settings.dryRun !== true) {
+      const pushed = pushOut(settings, `回复：${item.title}`, replyText, { kind: 'reply', time: new Date().toISOString() })
+      if (pushed !== null && typeof pushed.catch === 'function') pushed.catch(() => {})
+    }
+  }
+  if (action === 'custom' && buttonLabel !== '') {
+    emitServiceEvent('button', { kind: item.kind, title: item.title, button: buttonLabel })
+  }
   return action
 }
 
@@ -1006,6 +1076,20 @@ const parameters = {
       type: 'number',
       description: '周期提醒最多响几次；0 或不传表示一直重复。可用 /dsh-reminder-notify/recurring 查询或取消。',
     },
+    buttons: {
+      type: 'array',
+      description:
+        '这张卡上的自定义按钮（最多 3 个），每项 { label, url }；留空用插件配置里的全局按钮。带 url 的点开链接，不带 url 的只记一次点击。',
+      items: {
+        type: 'object',
+        properties: {
+          label: { type: 'string', description: '按钮上的字，最多 8 个字' },
+          url: { type: 'string', description: '点了要打开的地址，可留空' },
+        },
+        required: ['label'],
+        additionalProperties: false,
+      },
+    },
   },
 }
 
@@ -1051,6 +1135,7 @@ const CONFIG_ROUTE = '/dsh-reminder-notify/config'
 const PREVIEW_ROUTE = '/dsh-reminder-notify/preview'
 const BALANCE_ROUTE = '/dsh-reminder-notify/balance'
 const HISTORY_ROUTE = '/dsh-reminder-notify/history'
+const REPLIES_ROUTE = '/dsh-reminder-notify/replies'
 const EXPORT_ROUTE = '/dsh-reminder-notify/export'
 const DIGEST_ROUTE = '/dsh-reminder-notify/digest'
 const RECUR_ROUTE = '/dsh-reminder-notify/recurring'
@@ -2104,6 +2189,41 @@ function registerExportRoute(ctx, getSettings) {
   mountRoute(ctx, route, 'dsh-reminder-notify: history export route')
 }
 
+// 0.20：用户在卡片输入框里回的话，单独一条口子给面板和其它插件读。
+export function repliesOf(settings, limit = 20) {
+  const entries = readHistory(settings).filter((entry) => entry.action === 'replied' && str(entry.reply, '') !== '')
+  const size = Math.round(clamp(num(limit, 20), 1, 200))
+  return entries.slice(-size).reverse()
+}
+
+function registerRepliesRoute(ctx, getSettings) {
+  const reply = (res, status, payload) => {
+    res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+    res.end(JSON.stringify(payload))
+  }
+  const route = {
+    kind: 'exact',
+    path: REPLIES_ROUTE,
+    handler: async (req, res) => {
+      const settings = getSettings()
+      if (req.method === 'GET') {
+        const list = repliesOf(settings, 20)
+        reply(res, 200, { ok: true, count: list.length, replies: list })
+        return
+      }
+      const body = await readJsonBody(req)
+      if (body?.action === 'clear') {
+        const kept = readHistory(settings).filter((entry) => entry.action !== 'replied')
+        writeHistory(settings, kept)
+        reply(res, 200, { ok: true, action: 'clear', left: 0 })
+        return
+      }
+      reply(res, 200, { ok: true, replies: repliesOf(settings, 20) })
+    },
+  }
+  mountRoute(ctx, route, 'dsh-reminder-notify: replies route')
+}
+
 function registerHistoryRoute(ctx, getSettings) {
   const reply = (res, status, payload) => {
     res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
@@ -2586,6 +2706,8 @@ export function serviceOf(ctx, getSettings) {
     digest: (options = {}) => runDigest(ctx, getSettings, { force: (options || {}).force === true }),
     /** 提醒历史统计（不弹卡、不写文件）。 */
     stats: () => historyStats(readHistory(getSettings())),
+    /** 用户在卡片上回的话（最近 limit 条，新的在前）。 */
+    replies: (limit = 20) => repliesOf(getSettings(), limit),
     /** 当前生效的配置快照（只读副本）。 */
     config: () => ({ ...getSettings() }),
   }
@@ -2615,6 +2737,7 @@ export function apply(ctx, config) {
   registerTrayRoute(ctx, () => settingsOf(config))
   registerRecurringRoute(ctx, () => settingsOf(config))
   registerRecurringLoop(ctx, () => settingsOf(config))
+  registerRepliesRoute(ctx, () => settingsOf(config))
   registerDoctorRoute(ctx, () => settingsOf(config))
   const tools = typeof ctx.get === 'function' ? ctx.get('tools') : ctx.tools
   if (tools === undefined || tools === null || typeof tools.register !== 'function') {

@@ -24,6 +24,12 @@ dsh plugin --profile desktop add link:<本目录绝对路径>
 - **周期提醒**：`notify_user(kind, message, every: "30m", times: 5)` 会登记一条周期任务（`30m` / `2h` / `1d`，1 分钟–7 天），到点自己弹卡；`times` 不传就一直重复。任务存在 `~/.dsh/dsh-reminder-notify/recurring.json`，`GET /dsh-reminder-notify/recurring` 能看列表，POST `{"action":"cancel","id":"…"}` 或 `{"action":"cancel-all"}` 可取消。
 - **历史图表**：面板「历史与统计」里多了一排 30 天柱状图（每天一根，鼠标停上去看日期和条数），一眼看出哪天提醒多。
 
+## 0.20 起多了什么
+
+- **卡片上能回话**：`replyEnabled` 打开后卡上有输入框，打完按 Enter 就把这句话回给模型（`GET /dsh-reminder-notify/replies` 能取到最近 20 条，服务里也有 `replies()`）。
+- **自定义按钮**：`customButtons` 写「标签|网址」，多条分号隔开，最多 3 个；单条提醒也可以带 `buttons: [{ label, url }]`。
+- **专注助手静音**：`focusAssistMute` 打开后，Windows 专注助手 / 演示模式开着时卡片照弹但不响。
+
 ## 0.18.1 修了什么
 
 - **面板路由更稳**（0.18.1）：冷启动时 `webServer` 可能比插件晚就绪，路由现在会等它就绪再挂（最多等 60 秒），不再出现「面板一直 404」。

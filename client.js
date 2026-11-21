@@ -375,6 +375,18 @@ const EXPORT_ROUTE = '/dsh-reminder-notify/export'
       pushDigest: '日报也推送',
       speakEnabledHint: '用系统语音把标题和正文念出来；要装中文语音包，没装就静音。',
       buttonsEnabledHint: '卡片右下角给出「知道了」和「稍后提醒」；关掉就只剩自动关闭，点卡片仍可提前关。',
+      replyEnabled: '卡片上有输入框（可以回话）',
+      replyEnabledHint: '卡片上多一个输入框，打完按 Enter 就把这句话回给模型；回复会进历史，也能顺手推到手机。',
+      customButtons: '卡片上的自定义按钮',
+      customButtonsHint: '写成「标签|网址」，多个用分号隔开，最多 3 个。带网址的点开链接，不带网址的只记一次点击。',
+      focusAssistMute: '专注助手开着时自动静音',
+      focusAssistMuteHint: 'Windows 专注助手 / 演示模式开着时，卡片照样弹但不响，免得打断你。',
+      pushReply: '卡片回话也推送',
+      pushReplyHint: '你在卡片上回的话，也按上面的推送地址发到手机。',
+      historyActionReplied: '卡片回话',
+      historyActionCustom: '点了自定义按钮',
+      historyReplyPrefix: '回复：',
+      historyButtonPrefix: '按钮：',
       snoozeMinutesHint: '点「稍后提醒」后隔多久再弹一次。',
       queueEnabledHint: '关掉后多条提醒会同时叠在屏幕上。',
       queueMaxHint: '排队最多留几条，超出的丢掉最旧的。',
@@ -570,6 +582,18 @@ const EXPORT_ROUTE = '/dsh-reminder-notify/export'
       pushDigest: 'Push the digest too',
       speakEnabledHint: 'Read the title and body with the system voice; needs a Chinese voice pack, otherwise silent.',
       buttonsEnabledHint: 'Show “Got it” and “Snooze” on the card. Off means auto-dismiss only; clicking the card still closes it.',
+      replyEnabled: 'Reply box on the card',
+      replyEnabledHint: 'Adds a text box; press Enter to send the line back to the model. Replies land in history and can also be pushed to your phone.',
+      customButtons: 'Custom buttons on the card',
+      customButtonsHint: 'Write “label|url”, separate several with semicolons, at most 3. With a URL it opens the link; without one it only records the click.',
+      focusAssistMute: 'Mute while Focus Assist is on',
+      focusAssistMuteHint: 'When Windows Focus Assist / presentation mode is on, the card still shows but stays silent.',
+      pushReply: 'Push card replies too',
+      pushReplyHint: 'Also push the lines you type on the card to your phone.',
+      historyActionReplied: 'replied',
+      historyActionCustom: 'custom button',
+      historyReplyPrefix: 'reply: ',
+      historyButtonPrefix: 'button: ',
       snoozeMinutesHint: 'How long to wait before the snoozed reminder pops again.',
       queueEnabledHint: 'Off means several reminders stack on screen at once.',
       queueMaxHint: 'How many queued reminders to keep; the oldest are dropped.',
@@ -720,6 +744,11 @@ const EXPORT_ROUTE = '/dsh-reminder-notify/export'
       // 0.11：排队与合并、卡片按钮、免打扰、全屏降级、语音。
       { key: 'speakEnabled', group: 'queue', kind: 'boolean' },
       { key: 'buttonsEnabled', group: 'queue', kind: 'boolean' },
+      // 0.20：卡片输入框回复、自定义按钮、专注助手静音、回复也推手机。
+      { key: 'replyEnabled', group: 'queue', kind: 'boolean' },
+      { key: 'customButtons', group: 'queue', kind: 'text' },
+      { key: 'focusAssistMute', group: 'queue', kind: 'boolean' },
+      { key: 'pushReply', group: 'digest', kind: 'boolean' },
       { key: 'snoozeMinutes', group: 'queue', kind: 'number' },
       { key: 'queueEnabled', group: 'queue', kind: 'boolean' },
       { key: 'queueMax', group: 'queue', kind: 'number' },
@@ -795,6 +824,10 @@ const EXPORT_ROUTE = '/dsh-reminder-notify/export'
       balanceSpeak: 'balanceSpeakHint',
       speakEnabled: 'speakEnabledHint',
       buttonsEnabled: 'buttonsEnabledHint',
+      replyEnabled: 'replyEnabledHint',
+      customButtons: 'customButtonsHint',
+      focusAssistMute: 'focusAssistMuteHint',
+      pushReply: 'pushReplyHint',
       snoozeMinutes: 'snoozeMinutesHint',
       queueEnabled: 'queueEnabledHint',
       queueMax: 'queueMaxHint',
@@ -1447,9 +1480,13 @@ const EXPORT_ROUTE = '/dsh-reminder-notify/export'
           ok: 'historyActionOk',
           snooze: 'historyActionSnooze',
           'quiet-skip': 'historyActionQuietSkip',
+          replied: 'historyActionReplied',
+          custom: 'historyActionCustom',
         }
         const head = [shortTime(entry.at), label(kinds[entry.kind] || 'historyKindRaw'), label(actions[entry.action] || entry.action)]
         if (entry.count > 1) head.push('×' + entry.count)
+        if (String(entry.reply || '') !== '') head.push(label('historyReplyPrefix') + String(entry.reply).slice(0, 40))
+        if (String(entry.button || '') !== '') head.push(label('historyButtonPrefix') + String(entry.button).slice(0, 16))
         const text = String(entry.message || '').replace(/\s+/g, ' ').slice(0, 46)
         if (text !== '') head.push(text)
         return head.filter(Boolean).join(' · ')

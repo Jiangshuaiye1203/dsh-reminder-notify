@@ -37,6 +37,9 @@ param(
     [int]$SnoozeMinutes = 10,
     [switch]$NoButtons,
     [string]$OpenUrl = '',
+    [switch]$Reply,
+    [string]$CustomButtons = '',
+    [switch]$RespectFocus,
     [switch]$Compact,
     [switch]$AutoCompact,
     [int]$QueueLeft = 0,
@@ -65,6 +68,32 @@ using System.Runtime.InteropServices;
 using System.Windows.Forms;
 
 public struct DshRect { public int Left, Top, Right, Bottom; }
+
+// Windows「专注助手 / 免打扰」状态：shell32!SHQueryUserNotificationState
+// 1=NOT_PRESENT 2=BUSY 3=FULLSCREEN_D3D 4=PRESENTATION 5=ACCEPTS 6=QUIET_TIME 7=APP
+public static class DshFocus
+{
+    [DllImport("shell32.dll")]
+    public static extern int SHQueryUserNotificationState(out int state);
+
+    public static int State()
+    {
+        try
+        {
+            int state;
+            if (SHQueryUserNotificationState(out state) != 0) { return 0; }
+            return state;
+        }
+        catch { return 0; }
+    }
+
+    // 专注助手开启、演示模式、全屏忙、勿扰时段：这些时候不出声
+    public static bool SuppressAudio()
+    {
+        int state = State();
+        return state == 2 || state == 3 || state == 4 || state == 6;
+    }
+}
 
 public static class DshWin
 {
@@ -166,6 +195,22 @@ if ($Compact) {
     $width = 380
 }
 
+# ---- 自定义按钮（label|url;label|url，最多 3 个） ---------------------------
+$customList = New-Object System.Collections.ArrayList
+if ($showButtons -and -not [string]::IsNullOrWhiteSpace($CustomButtons)) {
+    foreach ($chunk in ($CustomButtons -split ';')) {
+        if ([string]::IsNullOrWhiteSpace($chunk)) { continue }
+        $pair = $chunk -split '\|', 2
+        $label = $pair[0].Trim()
+        if ($label -eq '') { continue }
+        $url = if ($pair.Count -gt 1) { $pair[1].Trim() } else { '' }
+        if ($label.Length -gt 8) { $label = $label.Substring(0, 8) }
+        [void]$customList.Add(@{ label = $label; url = $url })
+        if ($customList.Count -ge 3) { break }
+    }
+}
+$showReply = ($Reply -and $showButtons)
+
 $titleSize = 11.5
 $bodySize = 9.5
 $titleFont = New-Object System.Drawing.Font('Microsoft YaHei UI', $titleSize, [System.Drawing.FontStyle]::Bold, [System.Drawing.GraphicsUnit]::Point)
@@ -219,16 +264,23 @@ $okSize = $measureGfx.MeasureString($okText, $btnFont)
 $snoozeSize = $measureGfx.MeasureString($snoozeText, $btnFont)
 $okWidth = [int][Math]::Ceiling($okSize.Width) + 20
 $snoozeWidth = [int][Math]::Ceiling($snoozeSize.Width) + 20
+$customWidths = @()
+foreach ($item in $customList) {
+    $sz = $measureGfx.MeasureString($item.label, $btnFont)
+    $customWidths += ([int][Math]::Ceiling($sz.Width) + 20)
+}
 $measureGfx.Dispose()
 $measureBmp.Dispose()
 
 $headerHeight = [int][Math]::Ceiling($titleSizeF.Height)
 $bodyHeight = [int][Math]::Ceiling($bodySizeF.Height)
 $hintHeight = 16
+$customRowHeight = if ($showButtons -and $customList.Count -gt 0) { $buttonHeight + 6 } else { 0 }
+$replyHeight = if ($showReply) { 30 + 6 } else { 0 }
 $buttonsHeight = if ($showButtons) { $buttonHeight + 10 } else { 0 }
-$height = $padX + $headerHeight + $(if ($bodyHeight -gt 0) { 4 + $bodyHeight } else { 0 }) + 6 + $hintHeight + $buttonsHeight + $padX
+$height = $padX + $headerHeight + $(if ($bodyHeight -gt 0) { 4 + $bodyHeight } else { 0 }) + 6 + $hintHeight + $replyHeight + $customRowHeight + $buttonsHeight + $padX
 if ($height -lt 96) { $height = 96 }
-if ($height -gt 320) { $height = 320 }
+if ($height -gt 380) { $height = 380 }
 
 # 按钮矩形（相对窗口，右下角排列）
 $script:btnRects = @{}
@@ -244,6 +296,18 @@ if ($showButtons) {
         $openWidth = 78
         $openRect = New-Object System.Drawing.Rectangle ($okRect.Left - $buttonGap - $openWidth), $btnTop, $openWidth, $buttonHeight
         $script:btnRects['open'] = $openRect
+    }
+    $script:customRects = @()
+    if ($customList.Count -gt 0) {
+        $cx = $accentWidth + $padX
+        $cy = $btnTop - $buttonHeight - 6
+        for ($i = 0; $i -lt $customList.Count; $i++) {
+            $w = $customWidths[$i]
+            if (($cx + $w) -gt ($width - $padX)) { break }
+            $r = New-Object System.Drawing.Rectangle $cx, $cy, $w, $buttonHeight
+            $script:customRects += ,@($r, $i)
+            $cx = $cx + $w + 6
+        }
     }
 }
 
@@ -285,6 +349,36 @@ $path.AddArc($width - $radius * 2 - 1, $height - $radius * 2 - 1, $radius * 2, $
 $path.AddArc(0, $height - $radius * 2 - 1, $radius * 2, $radius * 2, 90, 90)
 $path.CloseFigure()
 $form.Region = New-Object System.Drawing.Region $path
+
+# ---- 回复输入框（-Reply）：卡片上直接打字，Enter 发回给插件 -------------------
+$script:replyBox = $null
+$script:replyRect = $null
+$script:replyText = ''
+if ($showReply) {
+    $boxTop = $height - $padX - $buttonsHeight - 6 - $customRowHeight - 26
+    $boxWidth = $width - $accentWidth - $padX - $padX
+    $box = New-Object System.Windows.Forms.TextBox
+    $box.BorderStyle = [System.Windows.Forms.BorderStyle]::FixedSingle
+    $box.BackColor = [System.Drawing.Color]::FromArgb(37, 43, 54)
+    $box.ForeColor = [System.Drawing.Color]::FromArgb(230, 237, 243)
+    $box.Font = $bodyFont
+    $box.Bounds = New-Object System.Drawing.Rectangle ($accentWidth + $padX), $boxTop, $boxWidth, 24
+    $box.MaxLength = 300
+    $box.Add_KeyDown({
+        param($bsender, $be)
+        if ($be.KeyCode -eq [System.Windows.Forms.Keys]::Enter) {
+            $script:replyText = $bsender.Text.Trim()
+            Close-With $(if ($script:replyText -eq '') { 'ok' } else { 'replied' })
+            $be.SuppressKeyPress = $true
+        } elseif ($be.KeyCode -eq [System.Windows.Forms.Keys]::Escape) {
+            Close-With 'dismiss'
+            $be.SuppressKeyPress = $true
+        }
+    })
+    $form.Controls.Add($box)
+    $script:replyBox = $box
+    $script:replyRect = $box.Bounds
+}
 
 $form.Add_Paint({
     param($sender, $e)
@@ -340,8 +434,11 @@ $form.Add_Paint({
     $hint = ('{0} 秒后自动关闭' -f $Seconds)
     if ($QueueLeft -gt 0) { $hint = $hint + (' · 还有 {0} 条' -f $QueueLeft) }
     if (-not $showButtons) { $hint = $hint + ' · 点一下关掉' }
+    if ($showReply) { $hint = $hint + ' · 输入后按 Enter 回话' }
+    if ($script:focusAssist) { $hint = $hint + ' · 专注中已静音' }
     $hintBrush = New-Object System.Drawing.SolidBrush $mutedColor
-    $g.DrawString($hint, $hintFont, $hintBrush, $textLeft, ($height - $padX - 12 - $buttonsHeight))
+    $hintTop = $height - $padX - 12 - $buttonsHeight - $customRowHeight - $replyHeight
+    $g.DrawString($hint, $hintFont, $hintBrush, $textLeft, $hintTop)
     $hintBrush.Dispose()
 
     # 按钮
@@ -371,12 +468,39 @@ $form.Add_Paint({
             $fmt.Dispose()
         }
     }
+
+    # 自定义按钮（多出来的那一行）
+    foreach ($pair in $script:customRects) {
+        $rect = $pair[0]
+        $idx = $pair[1]
+        $fill = if ($script:hover -eq ('c' + $idx)) { $btnHoverColor } else { $btnColor }
+        $btnPath = New-Object System.Drawing.Drawing2D.GraphicsPath
+        $r2 = 8
+        $btnPath.AddArc($rect.X, $rect.Y, $r2 * 2, $r2 * 2, 180, 90)
+        $btnPath.AddArc($rect.Right - $r2 * 2, $rect.Y, $r2 * 2, $r2 * 2, 270, 90)
+        $btnPath.AddArc($rect.Right - $r2 * 2, $rect.Bottom - $r2 * 2, $r2 * 2, $r2 * 2, 0, 90)
+        $btnPath.AddArc($rect.X, $rect.Bottom - $r2 * 2, $r2 * 2, $r2 * 2, 90, 90)
+        $btnPath.CloseFigure()
+        $btnBrush = New-Object System.Drawing.SolidBrush $fill
+        $g.FillPath($btnBrush, $btnPath)
+        $btnBrush.Dispose()
+        $btnPath.Dispose()
+        $fmt = New-Object System.Drawing.StringFormat
+        $fmt.Alignment = [System.Drawing.StringAlignment]::Center
+        $fmt.LineAlignment = [System.Drawing.StringAlignment]::Center
+        $labelBrush = New-Object System.Drawing.SolidBrush $bodyColor
+        $g.DrawString($customList[$idx].label, $btnFont, $labelBrush, (New-Object System.Drawing.RectangleF $rect.X, $rect.Y, $rect.Width, $rect.Height), $fmt)
+        $labelBrush.Dispose()
+        $fmt.Dispose()
+    }
 })
 
 # ---- 淡入 / 停留 / 淡出 ------------------------------------------------------
 $script:phase = 'in'
 $script:ticks = 0
 $script:action = 'timeout'
+$script:btnLabel = ''
+$script:btnUrl = ''
 $fadeTicks = 12      # ~180ms
 $script:deadline = (Get-Date).AddSeconds([Math]::Max(1, $Seconds))
 $script:holdStart = Get-Date
@@ -422,7 +546,13 @@ function Close-With([string]$action) {
 $form.KeyPreview = $true
 $form.Add_KeyDown({
     param($sender, $e)
-    if ($e.KeyCode -eq [System.Windows.Forms.Keys]::Enter) { Close-With 'ok' }
+    if ($e.KeyCode -eq [System.Windows.Forms.Keys]::Enter) {
+        if ($showReply -and $script:replyBox -ne $null) {
+            $typed = $script:replyBox.Text.Trim()
+            if ($typed -ne '') { $script:replyText = $typed; Close-With 'replied'; return }
+        }
+        Close-With 'ok'
+    }
     elseif ($e.KeyCode -eq [System.Windows.Forms.Keys]::S) { Close-With 'snooze' }
     elseif ($e.KeyCode -eq [System.Windows.Forms.Keys]::Escape) { Close-With 'dismiss' }
 })
@@ -430,6 +560,31 @@ $form.Add_KeyDown({
 $form.Add_MouseDown({
     param($sender, $e)
     if ($script:phase -eq 'out') { return }
+
+    # 点输入框：先激活窗口再聚焦（WS_EX_NOACTIVATE 下点一下也能打字）
+    if ($script:replyRect -ne $null -and $script:replyRect.Contains($e.X, $e.Y)) {
+        try { $form.Activate(); $script:replyBox.Focus() } catch { }
+        return
+    }
+
+    # 自定义按钮
+    foreach ($pair in $script:customRects) {
+        $rect = $pair[0]
+        if ($rect.Contains($e.X, $e.Y)) {
+            $idx = $pair[1]
+            $item = $customList[$idx]
+            $script:btnLabel = $item.label
+            $script:btnUrl = $item.url
+            if ($item.url -ne '') {
+                try { Start-Process $item.url | Out-Null } catch { }
+                Close-With 'ok'
+            } else {
+                Close-With 'custom'
+            }
+            return
+        }
+    }
+
     foreach ($key in @('open', 'ok', 'snooze')) {
         $rect = $script:btnRects[$key]
         if ($rect -ne $null -and $rect.Contains($e.X, $e.Y)) {
@@ -437,6 +592,10 @@ $form.Add_MouseDown({
                 try { Start-Process $OpenUrl | Out-Null } catch { }
                 Close-With 'ok'
                 return
+            }
+            if ($key -eq 'ok' -and $showReply -and $script:replyBox -ne $null) {
+                $typed = $script:replyBox.Text.Trim()
+                if ($typed -ne '') { $script:replyText = $typed; Close-With 'replied'; return }
             }
             Close-With $key
             return
@@ -449,9 +608,16 @@ $form.Add_MouseMove({
     param($sender, $e)
     if (-not $showButtons) { return }
     $next = ''
-    foreach ($key in @('ok', 'snooze')) {
+    foreach ($key in @('open', 'ok', 'snooze')) {
         $rect = $script:btnRects[$key]
         if ($rect -ne $null -and $rect.Contains($e.X, $e.Y)) { $next = $key }
+    }
+    foreach ($pair in $script:customRects) {
+        if ($pair[0].Contains($e.X, $e.Y)) { $next = ('c' + $pair[1]) }
+    }
+    if ($script:replyRect -ne $null -and $script:replyRect.Contains($e.X, $e.Y)) {
+        $form.Cursor = [System.Windows.Forms.Cursors]::IBeam
+        return
     }
     if ($next -ne $script:hover) {
         $script:hover = $next
@@ -466,7 +632,18 @@ $form.Add_MouseMove({
 # ogg 是否可播取决于系统是否装了对应解码器，播不了只记日志、不影响弹卡。
 $script:player = $null
 $script:wmp = $null
-if (-not $NoSound -and -not [string]::IsNullOrEmpty($Audio) -and (Test-Path -LiteralPath $Audio)) {
+# 专注助手 / 演示 / 全屏忙：按开关直接静音（配置 focusAssistMute）
+$script:focusAssist = $false
+if ($RespectFocus -and -not $NoSound) {
+    try {
+        $script:focusAssist = [DshFocus]::SuppressAudio()
+        Write-Log ('focus state=' + [DshFocus]::State() + ' suppress=' + $script:focusAssist)
+    } catch {
+        $script:focusAssist = $false
+        Write-Log ('focus-failed ' + $_.Exception.Message)
+    }
+}
+if (-not $NoSound -and -not $script:focusAssist -and -not [string]::IsNullOrEmpty($Audio) -and (Test-Path -LiteralPath $Audio)) {
     $ext = [System.IO.Path]::GetExtension($Audio).ToLowerInvariant()
     try {
         if ($ext -eq '.wav') {
@@ -535,6 +712,9 @@ if (-not [string]::IsNullOrEmpty($ResultPath)) {
             at        = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
             elapsedMs = $elapsedMs
             snooze    = $(if ($script:action -eq 'snooze') { [Math]::Max(1, $SnoozeMinutes) } else { 0 })
+            reply     = $(if ($script:action -eq 'replied') { $script:replyText } else { '' })
+            button    = $(if ($script:action -eq 'custom') { $script:btnLabel } else { '' })
+            focusAssist = $script:focusAssist
         }
         $json = ($payload | ConvertTo-Json -Compress)
         [System.IO.File]::WriteAllText($ResultPath, $json, (New-Object System.Text.UTF8Encoding($false)))

@@ -1,6 +1,6 @@
 // 纯逻辑自检：不弹窗口、不碰文件，只验证免打扰时段计算和历史统计。
 // 跑法：node tests/selftest-logic.mjs
-import { condStateAfter, digestDue, digestMessage, doctorReport, evaluateConditions, historyStats, inQuietHours, nextRunAfter, parseClock, parseEvery, pushPayload, quietEndAt, todayKey, toastArgsOf } from '../index.js'
+import { condStateAfter, customButtonsSpec, digestDue, digestMessage, doctorReport, evaluateConditions, historyStats, inQuietHours, nextRunAfter, parseClock, parseCustomButtons, parseEvery, pushPayload, quietEndAt, todayKey, toastArgsOf } from '../index.js'
 
 let failed = 0
 function check(label, actual, expected) {
@@ -144,6 +144,23 @@ check('parseEvery 0 分钟 -> null', parseEvery('0m'), null)
 check('parseEvery 8 天超上限 -> null', parseEvery('8d'), null)
 check('parseEvery 乱写 -> null', parseEvery('每半小时'), null)
 const t0 = 1795200000000
+// —— 0.20：自定义按钮解析 ——
+check('parseCustomButtons 单个', parseCustomButtons('打开文档|https://a.example'), [{ label: '打开文档', url: 'https://a.example' }])
+check('parseCustomButtons 两个', parseCustomButtons('记一下|;看日志|https://b.example').length, 2)
+check(
+  'parseCustomButtons 最多取三个',
+  parseCustomButtons('一|1;二|2;三|3;四|4').map((item) => item.label),
+  ['一', '二', '三'],
+)
+check('parseCustomButtons 空串', parseCustomButtons(''), [])
+check('parseCustomButtons label 截断八字节', parseCustomButtons('一二三四五六七八九十|u')[0].label.length, 8)
+check(
+  'customButtonsSpec 往返',
+  customButtonsSpec([{ label: '打开文档', url: 'https://a.example' }, { label: '记一下', url: '' }]),
+  '打开文档|https://a.example;记一下|',
+)
+check('customButtonsSpec 忽略空标签', customButtonsSpec([{ label: ' ', url: 'x' }]), '')
+
 check('nextRunAfter 正常加一个周期', nextRunAfter(t0, 30, t0 + 60 * 1000), t0 + 30 * 60 * 1000)
 check('nextRunAfter 跳过错过很多个', nextRunAfter(t0, 30, t0 + 3 * 3600 * 1000), t0 + 210 * 60 * 1000)
 check('nextRunAfter 到点前不跳', nextRunAfter(t0, 60, t0 + 60 * 1000), t0 + 60 * 60 * 1000)

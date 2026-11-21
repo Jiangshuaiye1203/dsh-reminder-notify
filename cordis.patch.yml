@@ -127,3 +127,11 @@
         recurringEnabled: true
         # 周期任务存档文件（留空 = 用户目录下 .dsh/dsh-reminder-notify/recurring.json）
         recurringFile: ''
+        # 卡片输入框回复（打完按 Enter 就把这句话回给模型）
+        replyEnabled: true
+        # 卡片上的自定义按钮：标签|网址，多条用分号隔开，最多 3 个
+        customButtons: ''
+        # Windows 专注助手 / 演示模式开着时自动静音
+        focusAssistMute: true
+        # 卡片回话也按上面的推送地址发到手机
+        pushReply: true
