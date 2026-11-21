@@ -265,6 +265,10 @@ const EXPORT_ROUTE = '/dsh-reminder-notify/export'
       tryDone: '发一张完成卡',
       tryDecide: '发一张决定卡',
       tryRaw: '发一张通用卡',
+      hintsShow: '显示小字',
+      hintsHide: '隐藏小字',
+      hintsShowHint: '把每一项下面的说明文字展开',
+      hintsHideHint: '收起说明文字，只看标题和控件',
       tryShown: '已经弹出一张样卡，20 秒后自动关闭。',
       tryQuiet: '现在在免打扰时段，样卡被拦住了（正常行为）。',
       tryFailed: '没能弹出示意卡：',
@@ -480,6 +484,10 @@ const EXPORT_ROUTE = '/dsh-reminder-notify/export'
       tryDone: 'Show a done card',
       tryDecide: 'Show a decision card',
       tryRaw: 'Show a plain card',
+      hintsShow: 'Show hints',
+      hintsHide: 'Hide hints',
+      hintsShowHint: 'Expand the explanation under every setting',
+      hintsHideHint: 'Collapse explanations, keep only labels and controls',
       tryShown: 'A sample card is on screen; it closes itself in 20 seconds.',
       tryQuiet: 'Quiet hours are active, so the sample was held back (expected).',
       tryFailed: 'Could not show the sample: ',
@@ -695,6 +703,8 @@ const EXPORT_ROUTE = '/dsh-reminder-notify/export'
 .drn-row-main { display: flex; flex-direction: column; gap: 2px; min-width: 180px; flex: 1 1 220px; }
 .drn-label { font-size: 13px; }
 .drn-hint { font-size: 11px; color: var(--dsw-alias-label-secondary); line-height: 1.45; }
+.drn-hints-off .drn-field-hint { display: none; }
+.drn-hints-btn { margin-left: auto; }
 .drn-bars { display: flex; align-items: flex-end; gap: 2px; height: 56px; margin: 6px 0 2px; }
 .drn-bar { flex: 1 1 0; min-height: 2px; background: var(--dsw-alias-brand-primary, #3b82f6); opacity: .85; border-radius: 2px; }
 .drn-control { flex: 0 1 260px; display: flex; justify-content: flex-end; }
@@ -937,6 +947,22 @@ const EXPORT_ROUTE = '/dsh-reminder-notify/export'
       // 0.13：折叠块的展开状态（默认全收起）与「试试看」的忙碌标记。
       const [openBlocks, setOpenBlocks] = React.useState({})
       const [tryBusy, setTryBusy] = React.useState(null)
+      const [hintsOn, setHintsOn] = React.useState(() => {
+        try {
+          return window.localStorage.getItem('drn-hints') === '1'
+        } catch (error) {
+          return false
+        }
+      })
+      const toggleHints = () => {
+        const next = !hintsOn
+        setHintsOn(next)
+        try {
+          window.localStorage.setItem('drn-hints', next ? '1' : '0')
+        } catch (error) {
+          // 存不了就算了，只影响下次默认值
+        }
+      }
       const [helpOpen, setHelpOpen] = React.useState({})
       const [doctor, setDoctor] = React.useState(null)
       const [tray, setTray] = React.useState(null)
@@ -1636,7 +1662,7 @@ const EXPORT_ROUTE = '/dsh-reminder-notify/export'
               { className: 'drn-row-main' },
               h('div', { className: 'drn-label' }, typeof t === 'function' ? t(field.key) : field.key),
               HINTS[field.key] && typeof t === 'function'
-                ? h('div', { className: 'drn-hint' }, t(HINTS[field.key]))
+                ? h('div', { className: 'drn-hint drn-field-hint' }, t(HINTS[field.key]))
                 : null,
             ),
             h('div', { className: 'drn-control' }, control(field)),
@@ -2054,11 +2080,21 @@ const EXPORT_ROUTE = '/dsh-reminder-notify/export'
           { type: 'button', className: 'drn-btn drn-try-btn', disabled: tryBusy !== null, onClick: () => tryCard('raw') },
           label('tryRaw'),
         ),
+        h(
+          'button',
+          {
+            type: 'button',
+            className: 'drn-btn drn-hints-btn',
+            title: label(hintsOn ? 'hintsHideHint' : 'hintsShowHint'),
+            onClick: toggleHints,
+          },
+          label(hintsOn ? 'hintsHide' : 'hintsShow'),
+        ),
       )
 
       return h(
         'div',
-        { className: 'drn-panel' },
+        { className: hintsOn ? 'drn-panel' : 'drn-panel drn-hints-off' },
         h(
           'div',
           { className: 'drn-head' },
