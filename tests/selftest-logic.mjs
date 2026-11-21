@@ -3,7 +3,7 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { mobileProxyPathOk, httpsLinkOf, mobileBarsOf, mobileCsvOf, mobileSettingsPatch, mobileViewOf, attachmentSummaryOf, mobileAttachmentsOf, uploadNameFor, condStateAfter, choicePromptText, choicesArgOf, normalizeChoices, resetChoiceSeen, unreadChoices, customButtonsOf, customButtonsSpec, escapeHtml, mobileLinkOf, mobilePageOf, phonePromptText, repliesOf, resetPhoneSeen, unreadPhoneReplies, digestDue, digestShownToday, digestMessage, doctorReport, evaluateConditions, historyStats, inQuietHours, nextRunAfter, parseClock, parseCustomButtons, parseEvery, pushPayload, quietEndAt, todayKey, toastArgsOf, feedbackEntryOf, issueUrlOf, envSummaryOf, statsOf, feedbackPathOf, backupNow, listBackups, readBackup, backupDirOf, parseDays, daysLabelOf, nextRunWithDays, resolvedHostMode, nativeNotifyArgs, mobileAccessAllowed, manifestOf, sanitizeLabel } from '../index.js'
+import { mobileProxyPathOk, httpsLinkOf, mobileBarsOf, mobileCsvOf, mobileSettingsPatch, mobileViewOf, attachmentSummaryOf, mobileAttachmentsOf, uploadNameFor, condStateAfter, choicePromptText, choicesArgOf, normalizeChoices, resetChoiceSeen, unreadChoices, customButtonsOf, customButtonsSpec, escapeHtml, mobileLinkOf, mobilePageOf, phonePromptText, repliesOf, resetPhoneSeen, unreadPhoneReplies, digestDue, digestShownToday, digestMessage, doctorReport, evaluateConditions, historyStats, inQuietHours, nextRunAfter, parseClock, parseCustomButtons, parseEvery, pushPayload, quietEndAt, todayKey, toastArgsOf, feedbackEntryOf, issueUrlOf, envSummaryOf, statsOf, feedbackPathOf, backupNow, listBackups, readBackup, backupDirOf, parseDays, daysLabelOf, nextRunWithDays, resolvedHostMode, nativeNotifyArgs, mobileAccessAllowed, manifestOf, sanitizeLabel, parseRules, ruleMatches, dueRules, reminderMetrics } from '../index.js'
 
 let failed = 0
 function check(label, actual, expected) {
@@ -470,6 +470,57 @@ check('附件名去掉方向控制符', sanitizeLabel('abc\u202edef'), 'abc def'
 check('附件名超长按字符截断', Array.from(sanitizeLabel('字'.repeat(200))).length <= 60, true)
 check('附件名不切坏代理对', /[\uD800-\uDBFF]$/.test(sanitizeLabel('😀'.repeat(80))), false)
 check('附件名全是坏字符时为空', sanitizeLabel('\u0000\u200b'), '')
+
+
+// ——— 0.36.0：规则引擎 ————————————————————————————————————
+const goodRules = parseRules(JSON.stringify([
+  { id: 'low-balance', when: { balanceBelow: 10 }, then: { kind: 'decide', title: '余额不多了', seconds: 400 } },
+  { id: 'busy', when: { queueBacklog: 3, kinds: ['raw'] }, then: { kind: 'raw', title: '有点挤' } },
+]))
+check('规则解析：两条都通过', goodRules.errors.length, 0)
+check('规则解析：seconds 保留 400', goodRules.rules[0].then.seconds, 400)
+check('规则解析：seconds 超过 600 被夹住', parseRules('[{"id":"s","when":{"quiet":true},"then":{"kind":"raw","seconds":900}}]').rules[0].then.seconds, 600)
+check('规则解析：默认冷却 60', goodRules.rules[1].then.cooldownMinutes, 60)
+check('规则解析：坏 JSON 报错', parseRules('{').errors.length > 0, true)
+check('规则解析：缺 when 报错', parseRules('[{"id":"a","then":{"kind":"raw"}}]').errors[0].indexOf('when') >= 0, true)
+check('规则解析：未知条件报错', parseRules('[{"id":"a","when":{"nope":1},"then":{"kind":"raw"}}]').errors.length, 1)
+check('规则解析：重复 id 报错', parseRules('[{"id":"a","when":{"quiet":true},"then":{"kind":"raw"}},{"id":"a","when":{"quiet":true},"then":{"kind":"raw"}}]').errors.length > 0, true)
+check('规则解析：空数组合法', parseRules('[]').rules.length, 0)
+check('规则解析：不是数组报错', parseRules('{}').errors.length > 0, true)
+
+const ruleQuiet = { id: 'q', when: { quiet: true }, then: { kind: 'raw' }, cooldownMinutes: 60 }
+check('规则匹配：免打扰命中', ruleMatches(ruleQuiet, { quiet: true }), true)
+check('规则匹配：免打扰未命中', ruleMatches(ruleQuiet, { quiet: false }), false)
+check('规则匹配：余额阈值', ruleMatches({ id: 'b', when: { balanceBelow: 20 }, then: { kind: 'raw' } }, { balance: 15 }), true)
+check('规则匹配：余额不够', ruleMatches({ id: 'b', when: { balanceBelow: 20 }, then: { kind: 'raw' } }, { balance: 25 }), false)
+check('规则匹配：档位限定', ruleMatches({ id: 'k', when: { kinds: ['done'] }, then: { kind: 'raw' } }, { kind: 'done' }), true)
+check('规则匹配：档位不符', ruleMatches({ id: 'k', when: { kinds: ['done'] }, then: { kind: 'raw' } }, { kind: 'raw' }), false)
+
+const dueSnap = { kind: 'raw', balance: 5, queueLength: 0, hostFailures: 0, todayCount: 0, quiet: false }
+const dueFirst = dueRules({ rules: JSON.stringify([{ id: 'b', when: { balanceBelow: 20 }, then: { kind: 'decide', title: '充值' }, cooldownMinutes: 60 }]), rulesState: '' }, dueSnap, {}, t0)
+check('规则到点：命中一次', dueFirst.fired.length, 1)
+check('规则到点：写成 decide', dueFirst.fired[0].then.kind, 'decide')
+const dueAgain = dueRules({ rules: JSON.stringify([{ id: 'b', when: { balanceBelow: 20 }, then: { kind: 'decide', title: '充值' }, cooldownMinutes: 60 }]), rulesState: JSON.stringify(dueFirst.state) }, dueSnap, dueFirst.state, t0 + 60 * 1000)
+check('规则到点：冷却内不再触发', dueAgain.fired.length, 0)
+const dueLater = dueRules({ rules: JSON.stringify([{ id: 'b', when: { balanceBelow: 20 }, then: { kind: 'decide', title: '充值' }, cooldownMinutes: 60 }]), rulesState: JSON.stringify(dueFirst.state) }, dueSnap, dueFirst.state, t0 + 61 * 60 * 1000)
+check('规则到点：冷却过了再触发', dueLater.fired.length, 1)
+
+// ——— 0.36.0：提醒效果统计 ————————————————————————————
+const metricEntries = [
+  { at: t0, kind: 'done', action: 'ok', elapsedMs: 4000 },
+  { at: t0 + 1000, kind: 'done', action: 'timeout', elapsedMs: 60000 },
+  { at: t0 + 2000, kind: 'decide', action: 'choice', elapsedMs: 8000 },
+  { at: t0 + 3000, kind: 'raw', action: 'timeout' },
+]
+const metricResult = reminderMetrics(metricEntries, t0 + 5000)
+check('统计：样本数只算有耗时的', metricResult.samples, 3)
+check('统计：平均耗时', metricResult.avgMs, Math.round((4000 + 60000 + 8000) / 3))
+check('统计：中位耗时', metricResult.medianMs, 8000)
+check('统计：忽略率（按全部条目算）', metricResult.ignorePct, 50)
+check('统计：done 档位条数', metricResult.byKind.done.count, 2)
+check('统计：decide 有响应', metricResult.byKind.decide.responded, 1)
+check('统计：最慢档位', metricResult.slowestKind && metricResult.slowestKind.kind, 'done')
+check('统计：每日序列 7 天', metricResult.daily.length, 7)
 
 if (failed > 0) { console.log('\n' + failed + ' 项失败'); process.exit(1) }
 console.log('\n全部通过')

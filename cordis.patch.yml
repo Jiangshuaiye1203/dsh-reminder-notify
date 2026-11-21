@@ -151,3 +151,6 @@
         httpsEnabled: false
         httpsPort: 1319
         httpsPfx: ''
+        rulesEnabled: true
+        rules: '[]'
+        rulesState: ''

@@ -48,6 +48,9 @@ export const Config = z === null ? undefined : z.object({
   muteDone: z.boolean().default(false).description('「完成」卡不弹，只记历史').volatile(),
   muteDecide: z.boolean().default(false).description('「需要你来决定」卡不弹，只记历史').volatile(),
   muteRaw: z.boolean().default(false).description('「普通」卡不弹，只记历史').volatile(),
+  rulesEnabled: z.boolean().default(true).description('按你自己写的规则弹卡').volatile(),
+  rules: z.string().default('[]').description('自定义规则（JSON 数组）').volatile(),
+  rulesState: z.string().default('').description('规则上次触发时间（插件自己维护）').volatile(),
   cardsEnabled: z.boolean().default(true).description('总开关：关掉后不再弹出任何提醒卡片（历史、日报推送照常）').volatile(),
   backupEnabled: z.boolean().default(true).description('自动备份配置到本机（每天一份，恢复时可回滚）').volatile(),
   backupDir: z.string().default('').description('备份目录，留空用 ~/.dsh/dsh-reminder-notify/backups').volatile(),
@@ -265,6 +268,9 @@ function settingsOf(config) {
     muteDone: c.muteDone === true,
     muteDecide: c.muteDecide === true,
     muteRaw: c.muteRaw === true,
+    rulesEnabled: c.rulesEnabled !== false,
+    rules: str(c.rules, '[]'),
+    rulesState: str(c.rulesState, ''),
     cardsEnabled: c.cardsEnabled !== false,
     statsEnabled: c.statsEnabled !== false,
     backupEnabled: c.backupEnabled !== false,
@@ -866,6 +872,8 @@ async function showItem(item) {
   if (settings.toastEnabled === true) {
     sendToast(settings, toastArgsOf(settings, item.kind, item.title, item.message))
   }
+  // 0.36：记下这张卡真正开始显示的时刻，退出时就能算出「从弹到你处理用了多久」。
+  const shownAt = Date.now()
   const argv = argvOfScriptHost({
     scriptPath,
     title: item.title,
@@ -952,6 +960,8 @@ async function showItem(item) {
   }
   appendHistory(settings, {
     at: Date.now(),
+    shownAt,
+    elapsedMs: Math.max(0, Date.now() - shownAt),
     kind: item.kind,
     title: item.title,
     message: item.message,
@@ -2062,6 +2072,98 @@ export function historyStats(entries) {
     byAction,
     last7: [...buckets.entries()].map(([date, count]) => ({ date, count })),
     last30: [...monthBuckets.entries()].map(([date, count]) => ({ date, count })),
+  }
+}
+
+// 0.36：提醒效果统计。
+// 关心两件事：这张卡显示多久才被处理（响应时长），以及多少提醒被完全忽略。
+// 0.36 之前的旧记录没有 shownAt，退化成不计入平均，但计入条数与被忽略比例。
+export function reminderMetrics(entries, now = Date.now()) {
+  const list = Array.isArray(entries) ? entries : []
+  const responded = new Set(['ok', 'replied', 'choice', 'custom', 'snooze'])
+  const ignored = new Set(['timeout', 'dismiss', 'host-failed'])
+  const dayKey = (ms) => {
+    const d = new Date(ms)
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  }
+  const daily = new Map()
+  for (let i = 6; i >= 0; i -= 1) {
+    const key = dayKey(now - i * 86400000)
+    daily.set(key, { date: key, count: 0, msSum: 0, msCount: 0 })
+  }
+  const byKind = {}
+  const samples = []
+  let respondedCount = 0
+  let ignoredCount = 0
+  for (const entry of list) {
+    if (entry === null || typeof entry !== 'object') continue
+    const kind = String(entry.kind ?? '')
+    const action = String(entry.action ?? '')
+    if (byKind[kind] === undefined) {
+      byKind[kind] = { count: 0, responded: 0, ignored: 0, snoozed: 0, replied: 0, choice: 0, msSum: 0, msCount: 0 }
+    }
+    const bucket = byKind[kind]
+    bucket.count += 1
+    if (responded.has(action)) {
+      bucket.responded += 1
+      respondedCount += 1
+    }
+    if (ignored.has(action)) {
+      bucket.ignored += 1
+      ignoredCount += 1
+    }
+    if (action === 'snooze') bucket.snoozed += 1
+    if (action === 'replied') bucket.replied += 1
+    if (action === 'choice') bucket.choice += 1
+    const elapsed = num(entry.elapsedMs, -1)
+    const when = num(entry.at, 0)
+    const day = daily.get(dayKey(when))
+    if (day !== undefined) day.count += 1
+    if (elapsed >= 0) {
+      bucket.msSum += elapsed
+      bucket.msCount += 1
+      samples.push(elapsed)
+      if (day !== undefined) {
+        day.msSum += elapsed
+        day.msCount += 1
+      }
+    }
+  }
+  const ratio = (part, total) => (total > 0 ? Math.round((part / total) * 1000) / 10 : null)
+  const avg = (sum, count) => (count > 0 ? Math.round(sum / count) : null)
+  for (const bucket of Object.values(byKind)) {
+    bucket.avgMs = avg(bucket.msSum, bucket.msCount)
+    bucket.ignorePct = ratio(bucket.ignored, bucket.count)
+    bucket.respondPct = ratio(bucket.responded, bucket.count)
+    delete bucket.msSum
+    delete bucket.msCount
+  }
+  samples.sort((a, b) => a - b)
+  const median = samples.length === 0 ? null : samples[Math.floor(samples.length / 2)]
+  const kinds = Object.entries(byKind)
+  const slowest = kinds
+    .filter(([, b]) => b.avgMs !== null)
+    .sort((a, b) => b[1].avgMs - a[1].avgMs)[0]
+  const noisiest = kinds
+    .filter(([, b]) => b.count >= 3)
+    .sort((a, b) => (b[1].ignorePct ?? 0) - (a[1].ignorePct ?? 0))[0]
+  return {
+    total: list.length,
+    respondedCount,
+    ignoredCount,
+    respondPct: ratio(respondedCount, list.length),
+    ignorePct: ratio(ignoredCount, list.length),
+    avgMs: avg(samples.reduce((sum, value) => sum + value, 0), samples.length),
+    medianMs: median,
+    samples: samples.length,
+    byKind,
+    daily: [...daily.values()].map((day) => ({
+      date: day.date,
+      count: day.count,
+      avgMs: avg(day.msSum, day.msCount),
+    })),
+    slowestKind: slowest === undefined ? null : { kind: slowest[0], avgMs: slowest[1].avgMs },
+    noisiestKind: noisiest === undefined ? null : { kind: noisiest[0], ignorePct: noisiest[1].ignorePct },
   }
 }
 
@@ -4023,12 +4125,126 @@ export function condStateAfter(settings, fired, now = new Date()) {
 export function conditionSnapshotOf(settings, now = new Date()) {
   const entries = readHistory(settings)
   const today = todayKey(now)
+  const baseline = num(balanceState.baseline, 0)
+  const balance = num(balanceState.balance, 0)
   return {
-    balance: num(balanceState.balance, 0),
+    balance,
+    balancePct: baseline > 0 ? Math.round((balance / baseline) * 1000) / 10 : null,
     queueLength: queue.length + (active !== null ? 1 : 0),
     hostFailures: num(hostHealth.failureCount, 0),
     todayCount: entries.filter((entry) => dayKeyOf(num(entry?.at, 0)) === today).length,
+    quiet: inQuietHours(settings, now),
   }
+}
+
+// 0.36：自定义规则——比内置那五条条件更自由一点：
+// 规则是一个数组，每条 = when（满足哪些条件）+ then（弹一张什么卡、隔多久才能再弹）。
+export const RULE_KINDS = ['done', 'decide', 'raw']
+
+export function parseRules(text) {
+  const errors = []
+  const rules = []
+  let raw
+  try {
+    raw = JSON.parse(String(text ?? '[]'))
+  } catch (error) {
+    return { rules: [], errors: [`不是合法 JSON：${str(error?.message ?? error, '').slice(0, 120)}`] }
+  }
+  if (!Array.isArray(raw)) return { rules: [], errors: ['规则要写成数组，例如 [{ "when": {...}, "then": {...} }]'] }
+  raw.forEach((item, index) => {
+    const label = `第 ${index + 1} 条`
+    if (item === null || typeof item !== 'object' || Array.isArray(item)) {
+      errors.push(`${label}不是对象`)
+      return
+    }
+    const when = item.when
+    const then = item.then
+    if (when === null || typeof when !== 'object' || Array.isArray(when)) {
+      errors.push(`${label}缺少 when`)
+      return
+    }
+    if (then === null || typeof then !== 'object' || Array.isArray(then)) {
+      errors.push(`${label}缺少 then`)
+      return
+    }
+    const cond = {}
+    for (const key of ['balanceBelow', 'balancePctBelow', 'queueBacklog', 'hostFailures', 'dailyCount']) {
+      if (when[key] === undefined) continue
+      const value = num(when[key], NaN)
+      if (Number.isNaN(value)) errors.push(`${label} when.${key} 要是数字`)
+      else cond[key] = value
+    }
+    if (when.quiet !== undefined) cond.quiet = when.quiet === true
+    if (Array.isArray(when.kinds)) {
+      const kinds = when.kinds.map((value) => String(value)).filter((value) => RULE_KINDS.includes(value))
+      if (kinds.length > 0) cond.kinds = kinds
+    }
+    if (Object.keys(cond).length === 0) {
+      errors.push(`${label} when 里没有可识别的条件（可用 balanceBelow / balancePctBelow / queueBacklog / hostFailures / dailyCount / quiet / kinds）`)
+      return
+    }
+    const kind = RULE_KINDS.includes(String(then.kind)) ? String(then.kind) : 'raw'
+    const id = str(item.id, '').replace(/[^A-Za-z0-9:_-]/g, '').slice(0, 40) || `rule-${index + 1}`
+    rules.push({
+      id,
+      when: cond,
+      then: {
+        kind,
+        title: str(then.title, '自定义规则').slice(0, 80),
+        message: str(then.message, '').slice(0, 600),
+        seconds: clamp(num(then.seconds, 40), 2, 600),
+        cooldownMinutes: clamp(num(then.cooldownMinutes, 60), 0, 1440),
+        options: kind === 'decide' ? normalizeChoices(then.options) : [],
+      },
+    })
+  })
+  const seen = new Set()
+  for (const rule of rules) {
+    if (seen.has(rule.id)) errors.push(`规则 id 重复：${rule.id}`)
+    seen.add(rule.id)
+  }
+  return { rules, errors }
+}
+
+export function ruleMatches(rule, snapshot = {}) {
+  const when = rule?.when ?? {}
+  if (when.balanceBelow !== undefined) {
+    if (typeof snapshot.balance !== 'number' || snapshot.balance > when.balanceBelow) return false
+  }
+  if (when.balancePctBelow !== undefined) {
+    if (typeof snapshot.balancePct !== 'number' || snapshot.balancePct > when.balancePctBelow) return false
+  }
+  if (when.queueBacklog !== undefined && num(snapshot.queueLength, 0) < when.queueBacklog) return false
+  if (when.hostFailures !== undefined && num(snapshot.hostFailures, 0) < when.hostFailures) return false
+  if (when.dailyCount !== undefined && num(snapshot.todayCount, 0) < when.dailyCount) return false
+  if (when.quiet !== undefined && (snapshot.quiet === true) !== when.quiet) return false
+  if (Array.isArray(when.kinds) && when.kinds.length > 0) {
+    if (!when.kinds.includes(String(snapshot.kind ?? ''))) return false
+  }
+  return true
+}
+
+export function rulesStateOf(text) {
+  try {
+    const raw = JSON.parse(String(text ?? '{}'))
+    return raw !== null && typeof raw === 'object' && !Array.isArray(raw) ? raw : {}
+  } catch {
+    return {}
+  }
+}
+
+export function dueRules(settings, snapshot = {}, state = {}, now = Date.now()) {
+  const parsed = parseRules(settings?.rules)
+  const fired = []
+  const next = { ...state }
+  for (const rule of parsed.rules) {
+    const lastAt = num(next[rule.id], 0)
+    if (rule.then.cooldownMinutes > 0 && now - lastAt < rule.then.cooldownMinutes * 60000) continue
+    if (!ruleMatches(rule, snapshot)) continue
+    fired.push(rule)
+    next[rule.id] = now
+  }
+  return { fired, state: next }
 }
 
 function registerConditionLoop(ctx, getSettings) {
@@ -4040,11 +4256,33 @@ function registerConditionLoop(ctx, getSettings) {
     running = true
     try {
       const now = new Date()
-      const fired = evaluateConditions(settings, conditionSnapshotOf(settings, now), now)
-      if (fired.length === 0) return
-      await saveBalanceState(ctx, { condState: condStateAfter(settings, fired, now) })
-      for (const item of fired) {
-        await notify('raw', { title: item.title, message: item.message, seconds: 40 }, getSettings()).catch(() => {})
+      const snapshot = conditionSnapshotOf(settings, now)
+      const fired = evaluateConditions(settings, snapshot, now)
+      if (fired.length > 0) {
+        await saveBalanceState(ctx, { condState: condStateAfter(settings, fired, now) })
+        for (const item of fired) {
+          await notify('raw', { title: item.title, message: item.message, seconds: 40 }, getSettings()).catch(() => {})
+        }
+      }
+      // 0.36：用户自己写的规则（和上面五条内置条件并行，互不影响）
+      if (settings.rulesEnabled !== false) {
+        const state = rulesStateOf(settings.rulesState)
+        const due = dueRules(settings, snapshot, state, now.getTime())
+        if (due.fired.length > 0) {
+          await saveBalanceState(ctx, { rulesState: JSON.stringify(due.state) })
+          for (const rule of due.fired) {
+            await notify(
+              rule.then.kind,
+              {
+                title: rule.then.title,
+                message: rule.then.message,
+                seconds: rule.then.seconds,
+                ...(rule.then.options.length >= 2 ? { options: rule.then.options } : {}),
+              },
+              getSettings(),
+            ).catch(() => {})
+          }
+        }
       }
     } catch {
       /* 条件判定出错不影响下一轮 */
@@ -4057,6 +4295,76 @@ function registerConditionLoop(ctx, getSettings) {
   }, 60 * 1000)
   if (typeof timer?.unref === 'function') timer.unref()
   ctx.effect(() => () => clearInterval(timer), 'dsh-reminder-notify: condition watcher')
+}
+
+const METRICS_ROUTE = '/dsh-reminder-notify/metrics'
+const RULES_ROUTE = '/dsh-reminder-notify/rules'
+
+function registerMetricsRoute(ctx, getSettings) {
+  const reply = (res, status, payload) => {
+    res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+    res.end(JSON.stringify(payload))
+  }
+  const route = {
+    kind: 'exact',
+    path: METRICS_ROUTE,
+    handler: (req, res) => {
+      try {
+        const settings = getSettings()
+        if ((req.method ?? 'GET').toUpperCase() !== 'GET') return reply(res, 405, { ok: false, error: 'use GET' })
+        return reply(res, 200, {
+          ok: true,
+          enabled: settings.historyEnabled !== false,
+          metrics: reminderMetrics(readHistory(settings), Date.now()),
+        })
+      } catch (error) {
+        return reply(res, 500, { ok: false, error: String(error?.message ?? error) })
+      }
+    },
+  }
+  mountRoute(ctx, route, 'dsh-reminder-notify: metrics route')
+}
+
+function registerRulesRoute(ctx, getSettings) {
+  const reply = (res, status, payload) => {
+    res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+    res.end(JSON.stringify(payload))
+  }
+  const route = {
+    kind: 'exact',
+    path: RULES_ROUTE,
+    handler: async (req, res) => {
+      try {
+        const settings = getSettings()
+        const method = (req.method ?? 'GET').toUpperCase()
+        if (method !== 'GET' && method !== 'POST') return reply(res, 405, { ok: false, error: 'use GET or POST' })
+        const body = method === 'POST' ? await readJsonBody(req) : null
+        const text = body === null ? settings.rules : str(body?.rules, settings.rules)
+        const parsed = parseRules(text)
+        const dry = body?.dry === true
+        if (method === 'POST' && dry !== true && parsed.errors.length === 0) {
+          await saveBalanceState(ctx, { rules: text, rulesState: '{}' })
+        }
+        return reply(res, 200, {
+          ok: parsed.errors.length === 0,
+          enabled: settings.rulesEnabled !== false,
+          text,
+          dry,
+          rules: parsed.rules.map((rule) => ({
+            id: rule.id,
+            when: rule.when,
+            then: rule.then,
+            lastAt: num(rulesStateOf(settings.rulesState)[rule.id], 0) || null,
+          })),
+          errors: parsed.errors,
+          snapshot: conditionSnapshotOf(settings, new Date()),
+        })
+      } catch (error) {
+        return reply(res, 500, { ok: false, error: String(error?.message ?? error) })
+      }
+    },
+  }
+  mountRoute(ctx, route, 'dsh-reminder-notify: rules route')
 }
 
 function registerTrayRoute(ctx, getSettings) {
@@ -4231,6 +4539,7 @@ export function serviceOf(ctx, getSettings) {
     stats: () => historyStats(readHistory(getSettings())),
     /** 用户在卡片上回的话（最近 limit 条，新的在前）。 */
     replies: (limit = 20) => repliesOf(getSettings(), limit),
+    metrics: () => reminderMetrics(readHistory(getSettings()), Date.now()),
     /** 当前生效的配置快照（只读副本）。 */
     config: () => ({ ...getSettings() }),
   }
@@ -4287,6 +4596,8 @@ export function apply(ctx, config) {
   registerStatsRoute(ctx, () => settingsOf(config))
   registerFeedbackRoute(ctx, () => settingsOf(config))
   registerBackupRoute(ctx, () => settingsOf(config))
+  registerMetricsRoute(ctx, () => settingsOf(config))
+  registerRulesRoute(ctx, () => settingsOf(config))
   {
     let proxy = null
     const ensureHttps = () => {

@@ -24,6 +24,8 @@ window.__ModuleLoader__.load({
     const HISTORY_ROUTE = '/dsh-reminder-notify/history'
     const RECUR_ROUTE = '/dsh-reminder-notify/recurring'
     const MOBILE_LINK_ROUTE = '/dsh-reminder-notify/mobile/link'
+    const METRICS_ROUTE = '/dsh-reminder-notify/metrics'
+    const RULES_ROUTE = '/dsh-reminder-notify/rules'
     const DOCTOR_ROUTE = '/dsh-reminder-notify/doctor'
     const TRAY_ROUTE = '/dsh-reminder-notify/tray'
 const EXPORT_ROUTE = '/dsh-reminder-notify/export'
@@ -326,6 +328,28 @@ const BACKUP_ROUTE = '/dsh-reminder-notify/backup'
       check_service_api: '宿主服务',
       check_host_exit: '宿主退出码',
       groupCond: '条件提醒',
+      groupRules: '自定义规则',
+      rulesEnabled: '启用自定义规则',
+      rulesEnabledHint: '关掉后下面的规则全部不生效（内置的五条条件提醒不受影响）。',
+      rulesIntro: '规则 = 什么时候（when）+ 弹什么卡（then）',
+      rulesHint: 'when 可写 balanceBelow（余额低于多少元）、balancePctBelow（低于基线的百分比）、queueBacklog（排队超过几条）、hostFailures（宿主连续失败几次）、dailyCount（当天提醒超过几条）、quiet（是否在免打扰时段）、kinds（限定档位）。then 里 kind 取 done/decide/raw，可带 title、message、seconds、cooldownMinutes、options（decide 的候选按钮）。',
+      rulesExample: '例：[{ "id": "low-balance", "when": { "balanceBelow": 10 }, "then": { "kind": "decide", "title": "余额不多了", "message": "要不要先充一点？", "cooldownMinutes": 180 } }]',
+      rulesCheck: '校验',
+      rulesSave: '保存到配置',
+      rulesBusy: '处理中…',
+      rulesChecked: '规则能通过校验。',
+      rulesNone: '现在没有规则，写一条试试。',
+      rulesActive: '当前规则：',
+      rulesLast: '上次触发',
+      metricsTitle: '响应速度',
+      metricsLoading: '读取中…',
+      metricsFailed: '读不到统计数据。',
+      metricsAvg: '平均',
+      metricsMedian: '中位',
+      metricsIgnored: '被忽略',
+      metricsRefresh: '刷新统计',
+      metricsRefreshing: '刷新中…',
+
       conditionsEnabled: '开启条件提醒',
       conditionsEnabledHint: '满足条件时主动弹一张卡，不用等模型调用。每 60 秒检查一次。',
       condBalanceBelow: '余额跌破阈值时提醒',
@@ -589,6 +613,28 @@ const BACKUP_ROUTE = '/dsh-reminder-notify/backup'
       check_service_api: 'host service API',
       check_host_exit: 'host exit code',
       groupCond: 'Conditional reminders',
+      groupRules: 'Custom rules',
+      rulesEnabled: 'Enable custom rules',
+      rulesEnabledHint: 'Turn off to disable every rule below (the five built-in conditions keep working).',
+      rulesIntro: 'A rule = when to fire + what card to show',
+      rulesHint: 'when accepts balanceBelow (money), balancePctBelow (percent of baseline), queueBacklog, hostFailures, dailyCount, quiet (boolean) and kinds. then takes kind (done/decide/raw) plus title, message, seconds, cooldownMinutes and options.',
+      rulesExample: 'e.g. [{ "id": "low-balance", "when": { "balanceBelow": 10 }, "then": { "kind": "decide", "title": "Low balance", "message": "Top up soon?", "cooldownMinutes": 180 } }]',
+      rulesCheck: 'Validate',
+      rulesSave: 'Save to config',
+      rulesBusy: 'Working...',
+      rulesChecked: 'Rules look valid.',
+      rulesNone: 'No rules yet.',
+      rulesActive: 'Current rules:',
+      rulesLast: 'last fired',
+      metricsTitle: 'Response speed',
+      metricsLoading: 'Loading...',
+      metricsFailed: 'No stats available.',
+      metricsAvg: 'avg',
+      metricsMedian: 'median',
+      metricsIgnored: 'ignored',
+      metricsRefresh: 'Refresh',
+      metricsRefreshing: 'Refreshing...',
+
       conditionsEnabled: 'Enable conditional reminders',
       conditionsEnabledHint: 'Pop a card by itself when a condition matches, without waiting for the model. Checked every 60 seconds.',
       condBalanceBelow: 'Remind when balance drops below a threshold',
@@ -817,6 +863,8 @@ const BACKUP_ROUTE = '/dsh-reminder-notify/backup'
 .drn-hints-off .drn-field-hint { display: none; }
 .drn-hints-btn { margin-left: auto; }
 .drn-bars { display: flex; align-items: flex-end; gap: 2px; height: 56px; margin: 6px 0 2px; }
+    .drn-rules-text { min-height: 120px; font-family: ui-monospace, Consolas, monospace; font-size: 12px; }
+    .drn-rules-error { color: #e5484d; }
 .drn-feedback-text { width: 100%; box-sizing: border-box; font: inherit; font-size: 13px; line-height: 1.5; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--dsw-alias-border-l1); background: var(--dsw-alias-bg-base); color: var(--dsw-alias-label-primary); resize: vertical; }
 .drn-bar { flex: 1 1 0; min-height: 2px; background: var(--dsw-alias-brand-primary, #3b82f6); opacity: .85; border-radius: 2px; }
 .drn-control { flex: 0 1 260px; display: flex; justify-content: flex-end; }
@@ -850,6 +898,7 @@ const BACKUP_ROUTE = '/dsh-reminder-notify/backup'
     // 字段表：kind 决定控件类型，group 决定分组，缺省值来自宿主 config。
     const FIELDS = [
       { key: 'cardsEnabled', group: 'basic', kind: 'boolean' },
+      { key: 'rulesEnabled', group: 'rules', kind: 'boolean' },
       { key: 'muteDone', group: 'basic', kind: 'boolean' },
       { key: 'muteDecide', group: 'basic', kind: 'boolean' },
       { key: 'muteRaw', group: 'basic', kind: 'boolean' },
@@ -1011,8 +1060,8 @@ const BACKUP_ROUTE = '/dsh-reminder-notify/backup'
       trayHotkey: 'trayHotkeyHint',
     }
 
-    const GROUPS = ['basic', 'audio', 'look', 'queue', 'cond', 'history', 'digest', 'balance', 'host']
-    const GROUP_LABELS = { basic: 'groupBasic', audio: 'groupAudio', look: 'groupLook', queue: 'groupQueue', cond: 'groupCond', history: 'groupHistory', digest: 'groupDigest', balance: 'groupBalance', host: 'groupHost' }
+    const GROUPS = ['basic', 'audio', 'look', 'queue', 'cond', 'rules', 'history', 'digest', 'balance', 'host']
+    const GROUP_LABELS = { basic: 'groupBasic', audio: 'groupAudio', look: 'groupLook', queue: 'groupQueue', cond: 'groupCond', rules: 'groupRules', history: 'groupHistory', digest: 'groupDigest', balance: 'groupBalance', host: 'groupHost' }
 
     // 0.13：面板分两层。常用层只放「不填就不对劲」的项，其余按主题收进四个折叠块。
     const COMMON_DIGEST = ['pushEnabled', 'pushUrl', 'pushFormat', 'digestEnabled', 'digestTime']
@@ -1023,6 +1072,7 @@ const BACKUP_ROUTE = '/dsh-reminder-notify/backup'
       { id: 'queue', label: 'groupQueue', groups: ['queue'] },
       { id: 'cond', label: 'groupCond', groups: ['cond'] },
       { id: 'misc', label: 'groupAdvanced', groups: ['digest', 'history', 'balance', 'host'] },
+      { id: 'rules', label: 'groupRules', groups: ['rules'] },
       { id: 'backup', label: 'groupBackup', groups: [] },
       { id: 'stats', label: 'groupStats', groups: [] },
       { id: 'feedback', label: 'groupFeedback', groups: [] },
@@ -1067,6 +1117,11 @@ const BACKUP_ROUTE = '/dsh-reminder-notify/backup'
       const [recurringBusy, setRecurringBusy] = React.useState(false)
       const [mobile, setMobile] = React.useState(null)
       const [mobileBusy, setMobileBusy] = React.useState(false)
+      const [metrics, setMetrics] = React.useState(null)
+      const [metricsBusy, setMetricsBusy] = React.useState(false)
+      const [rulesList, setRulesList] = React.useState(null)
+      const [rulesBusy, setRulesBusy] = React.useState(false)
+      const [rulesErrors, setRulesErrors] = React.useState([])
       const [digest, setDigest] = React.useState(null)
       const [digestBusy, setDigestBusy] = React.useState(false)
       // 0.13：折叠块的展开状态（默认全收起）与「试试看」的忙碌标记。
@@ -1165,6 +1220,8 @@ const BACKUP_ROUTE = '/dsh-reminder-notify/backup'
         refreshHistory()
         refreshRecurring()
         refreshMobile()
+        refreshMetrics()
+        refreshRules()
         refreshTray()
         refreshDigest()
         refreshStats()
@@ -1578,6 +1635,78 @@ const BACKUP_ROUTE = '/dsh-reminder-notify/backup'
           .then(() => setMobileBusy(false))
       }
 
+      function msText(ms) {
+        if (typeof ms !== 'number' || !isFinite(ms)) return '—'
+        if (ms < 1000) return `${Math.round(ms)}ms`
+        if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`
+        return `${Math.round(ms / 60000)}m`
+      }
+
+      function refreshMetrics() {
+        setMetricsBusy(true)
+        fetch(METRICS_ROUTE, { headers: { accept: 'application/json' } })
+          .then((res) => res.json())
+          .then((data) => setMetrics(data && data.ok ? data : { ok: false }))
+          .catch(() => setMetrics({ ok: false }))
+          .then(() => setMetricsBusy(false))
+      }
+
+      function rulesFetch(options) {
+        setRulesBusy(true)
+        return fetch(RULES_ROUTE, options)
+          .then((res) => res.json())
+          .then((data) => {
+            setRulesList(data && data.ok !== undefined ? data : null)
+            setRulesErrors(data && Array.isArray(data.errors) ? data.errors : [])
+            return data
+          })
+          .catch(() => {
+            setRulesErrors(['请求失败'])
+            return null
+          })
+          .finally(() => setRulesBusy(false))
+      }
+
+      function refreshRules() {
+        return rulesFetch({ headers: { accept: 'application/json' } })
+      }
+
+      function checkRules() {
+        const text = draft && typeof draft.rules === 'string' ? draft.rules : '[]'
+        return rulesFetch({
+          method: 'POST',
+          headers: { 'content-type': 'application/json', accept: 'application/json' },
+          body: JSON.stringify({ rules: text, dry: true }),
+        }).then((data) => {
+          if (data && data.ok === true) {
+            setMessage({ ok: true, text: typeof t === 'function' ? t('rulesChecked') : 'rulesChecked' })
+          }
+          return data
+        })
+      }
+
+      function saveRulesNow() {
+        const text = draft && typeof draft.rules === 'string' ? draft.rules : '[]'
+        setBusy(true)
+        return fetch(CONFIG_ROUTE, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', accept: 'application/json' },
+          body: JSON.stringify({ values: { rules: text } }),
+        })
+          .then((res) => res.json())
+          .then((data) => {
+            if (data && data.ok === true) setSaved(true)
+            setMessage(
+              data && data.ok === true
+                ? { ok: true, text: `${typeof t === 'function' ? t('saved') : 'saved'}` }
+                : { ok: false, text: `${typeof t === 'function' ? t('failed') : 'failed'}: ${(data && data.error) || 'unknown'}` },
+            )
+            return refreshRules()
+          })
+          .catch(() => setMessage({ ok: false, text: `${typeof t === 'function' ? t('failed') : 'failed'}: network` }))
+          .finally(() => setBusy(false))
+      }
+
       function copyMobile() {
         if (!mobile || !mobile.url) return
         const label = typeof t === 'function' ? t : (key) => key
@@ -1855,6 +1984,31 @@ const BACKUP_ROUTE = '/dsh-reminder-notify/backup'
               h(
                 'div',
                 { className: 'drn-row-main' },
+                h('div', { className: 'drn-row', key: 'metrics-row' },
+                  h(
+                    'div',
+                    { className: 'drn-row-main' },
+                    h('div', { className: 'drn-label' }, label('metricsTitle')),
+                    h('div', { className: 'drn-hint' },
+                      metrics === null
+                        ? label('metricsLoading')
+                        : !(metrics.ok === true && metrics.metrics)
+                          ? label('metricsFailed')
+                          : `${label('metricsAvg')} ${msText(metrics.metrics.avgMs)} · ${label('metricsMedian')} ${msText(metrics.metrics.medianMs)} · ${label('metricsIgnored')} ${metrics.metrics.ignorePct == null ? '—' : metrics.metrics.ignorePct + '%'}`,
+                    ),
+                    ...((metrics && metrics.ok === true && metrics.metrics
+                      ? ['done', 'decide', 'raw'].map((kind) => {
+                          const bucket = metrics.metrics.byKind && metrics.metrics.byKind[kind]
+                          if (!bucket || bucket.count === 0) return null
+                          return h('div', { className: 'drn-hint', key: 'metrics-' + kind },
+                            `${label('historyKind' + kind[0].toUpperCase() + kind.slice(1))} ${bucket.count} · ${label('metricsAvg')} ${msText(bucket.avgMs)} · ${label('metricsIgnored')} ${bucket.ignorePct == null ? '—' : bucket.ignorePct + '%'}`)
+                        })
+                      : []).filter(Boolean)),
+                  ),
+                  h('div', { className: 'drn-pick' },
+                    h('button', { type: 'button', className: 'drn-btn drn-digest-btn', disabled: metricsBusy, onClick: refreshMetrics }, label(metricsBusy ? 'metricsRefreshing' : 'metricsRefresh')),
+                  ),
+                ),
                 h('div', { className: 'drn-label' }, label('historyChart')),
                 h('div', { className: 'drn-bars' }, barsOf(buckets)),
                 h('div', { className: 'drn-hint' }, label('historyChartHint')),
@@ -2224,6 +2378,42 @@ const BACKUP_ROUTE = '/dsh-reminder-notify/backup'
         }
       }
 
+      function rulesBlock() {
+        const label = typeof t === 'function' ? t : (key) => key
+        const draftRules = draft && typeof draft.rules === 'string' ? draft.rules : '[]'
+        const list = rulesList && Array.isArray(rulesList.rules) ? rulesList.rules : []
+        return h(
+          'div',
+          { className: 'drn-help', key: 'rules-panel' },
+          h('div', { className: 'drn-head-intro' }, label('rulesIntro')),
+          h('div', { className: 'drn-hint' }, label('rulesHint')),
+          h('textarea', {
+            className: 'drn-feedback-text drn-rules-text',
+            spellCheck: false,
+            value: draftRules,
+            onChange: (event) => (draft ? edit({ rules: event.target.value }) : null),
+          }),
+          h(
+            'div',
+            { className: 'drn-pick' },
+            h('button', { type: 'button', className: 'drn-btn drn-digest-btn', disabled: rulesBusy, onClick: checkRules }, label(rulesBusy ? 'rulesBusy' : 'rulesCheck')),
+            h('button', { type: 'button', className: 'drn-btn drn-digest-btn', disabled: rulesBusy || busy, onClick: saveRulesNow }, label('rulesSave')),
+          ),
+          h('div', { className: 'drn-hint' }, label('rulesExample')),
+          rulesErrors.length === 0
+            ? null
+            : h('div', { className: 'drn-hint drn-rules-error' }, rulesErrors.join('；')),
+          h('div', { className: 'drn-hint' }, list.length === 0 ? label('rulesNone') : label('rulesActive')),
+          ...list.map((rule) =>
+            h(
+              'div',
+              { className: 'drn-hint', key: 'rule-' + rule.id },
+              `${rule.id} → ${rule.then.kind}「${rule.then.title}」${rule.lastAt ? ' · ' + label('rulesLast') + ' ' + shortTime(rule.lastAt) : ''}`,
+            ),
+          ),
+        )
+      }
+
       function statsBlock() {
         const value = stats || {}
         const series = Array.isArray(value.series) ? value.series : []
@@ -2412,7 +2602,7 @@ const BACKUP_ROUTE = '/dsh-reminder-notify/backup'
 
       const advanced = ADV_BLOCKS.map((block) => {
         const open = openBlocks[block.id] === true
-        const children = block.id === 'backup' ? backupBlock() : block.id === 'stats' ? statsBlock() : block.id === 'feedback' ? feedbackBlock() : block.id === 'doctor'
+        const children = block.id === 'rules' ? rulesBlock() : block.id === 'backup' ? backupBlock() : block.id === 'stats' ? statsBlock() : block.id === 'feedback' ? feedbackBlock() : block.id === 'doctor'
           ? [
               h(
                 'div',
