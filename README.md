@@ -19,6 +19,11 @@ dsh plugin --profile desktop add link:<本目录绝对路径>
 - **原生系统通知**：`toastEnabled` 打开后，卡片弹出的同时在 Windows 右下角发一个系统气泡（`host/ToastHost.ps1`，`NotifyIcon.ShowBalloonTip`，3–60 秒）。
 - **托盘与热键**：`trayEnabled` 打开后起托盘图标（`host/TrayHost.ps1`），菜单里有静音 / 免打扰 / 打开目录；`Ctrl+Alt+R`（可改 `trayHotkey`）随时手弹一张提醒。面板「工程与可靠性：自检」里能启停托盘、发一条原生通知、看托盘状态。
 
+## 0.19 起多了什么
+
+- **周期提醒**：`notify_user(kind, message, every: "30m", times: 5)` 会登记一条周期任务（`30m` / `2h` / `1d`，1 分钟–7 天），到点自己弹卡；`times` 不传就一直重复。任务存在 `~/.dsh/dsh-reminder-notify/recurring.json`，`GET /dsh-reminder-notify/recurring` 能看列表，POST `{"action":"cancel","id":"…"}` 或 `{"action":"cancel-all"}` 可取消。
+- **历史图表**：面板「历史与统计」里多了一排 30 天柱状图（每天一根，鼠标停上去看日期和条数），一眼看出哪天提醒多。
+
 ## 0.18.1 修了什么
 
 - **面板路由更稳**（0.18.1）：冷启动时 `webServer` 可能比插件晚就绪，路由现在会等它就绪再挂（最多等 60 秒），不再出现「面板一直 404」。

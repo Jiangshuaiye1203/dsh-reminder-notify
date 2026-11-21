@@ -22,6 +22,7 @@ window.__ModuleLoader__.load({
     const BALANCE_ROUTE = '/dsh-reminder-notify/balance'
     // 0.11 新增：提醒历史（GET 拿统计+最近记录，POST { mode: 'clear' } 清空）。
     const HISTORY_ROUTE = '/dsh-reminder-notify/history'
+    const RECUR_ROUTE = '/dsh-reminder-notify/recurring'
     const DOCTOR_ROUTE = '/dsh-reminder-notify/doctor'
     const TRAY_ROUTE = '/dsh-reminder-notify/tray'
 const EXPORT_ROUTE = '/dsh-reminder-notify/export'
@@ -420,6 +421,14 @@ const EXPORT_ROUTE = '/dsh-reminder-notify/export'
       historyActionOk: '知道了',
       historyActionSnooze: '稍后提醒',
       historyActionQuietSkip: '免打扰跳过',
+      historyChart: '最近 30 天',
+      historyChartHint: '每根柱子一天，越长说明那天弹得越多；鼠标停住看日期与条数。',
+      recurringTitle: '周期提醒',
+      recurringNone: '现在没有周期提醒。让模型用 every: "30m" 发一条就能建。',
+      recurringNext: '下次',
+      recurringHint: '到点自动弹卡；times 用完就自动消失。取消只看最近一条。',
+      recurringRefresh: '刷新',
+      recurringCancel: '取消最近一条',
       groupHelp: '使用说明（点开才看）',
       helpIntro: '下面每条点开才看，平时不占地方。',
       helpUse: '什么时候会弹',
@@ -607,6 +616,14 @@ const EXPORT_ROUTE = '/dsh-reminder-notify/export'
       historyActionOk: 'got it',
       historyActionSnooze: 'snoozed',
       historyActionQuietSkip: 'skipped (quiet hours)',
+      historyChart: 'Last 30 days',
+      historyChartHint: 'One bar per day; taller means more reminders. Hover for the date and count.',
+      recurringTitle: 'Recurring reminders',
+      recurringNone: 'No recurring reminders. Ask the model to send one with every: "30m".',
+      recurringNext: 'next',
+      recurringHint: 'Each one fires on schedule and disappears after its times limit. Cancel removes the newest one.',
+      recurringRefresh: 'Refresh',
+      recurringCancel: 'Cancel newest',
       groupHelp: 'How it works (expand to read)',
       helpIntro: 'Each topic stays folded until you open it.',
       helpUse: 'When a card appears',
@@ -637,6 +654,8 @@ const EXPORT_ROUTE = '/dsh-reminder-notify/export'
 .drn-row-main { display: flex; flex-direction: column; gap: 2px; min-width: 180px; flex: 1 1 220px; }
 .drn-label { font-size: 13px; }
 .drn-hint { font-size: 11px; color: var(--dsw-alias-label-secondary); line-height: 1.45; }
+.drn-bars { display: flex; align-items: flex-end; gap: 2px; height: 56px; margin: 6px 0 2px; }
+.drn-bar { flex: 1 1 0; min-height: 2px; background: var(--dsw-alias-brand-primary, #3b82f6); opacity: .85; border-radius: 2px; }
 .drn-control { flex: 0 1 260px; display: flex; justify-content: flex-end; }
 .drn-input, .drn-select { width: 100%; box-sizing: border-box; font: inherit; font-size: 13px; padding: 6px 8px; border-radius: 7px; border: 1px solid var(--dsw-alias-border-l1); background: var(--dsw-alias-bg-base); color: var(--dsw-alias-label-primary); }
 .drn-input:focus, .drn-select:focus { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: -1px; }
@@ -859,6 +878,8 @@ const EXPORT_ROUTE = '/dsh-reminder-notify/export'
       const [balanceBusy, setBalanceBusy] = React.useState(false)
       const [history, setHistory] = React.useState(null)
       const [historyBusy, setHistoryBusy] = React.useState(false)
+      const [recurring, setRecurring] = React.useState(null)
+      const [recurringBusy, setRecurringBusy] = React.useState(false)
       const [digest, setDigest] = React.useState(null)
       const [digestBusy, setDigestBusy] = React.useState(false)
       // 0.13：折叠块的展开状态（默认全收起）与「试试看」的忙碌标记。
@@ -928,6 +949,7 @@ const EXPORT_ROUTE = '/dsh-reminder-notify/export'
       React.useEffect(() => {
         refreshBalance()
         refreshHistory()
+        refreshRecurring()
         refreshTray()
         refreshDigest()
       }, [])
@@ -1329,6 +1351,29 @@ const EXPORT_ROUTE = '/dsh-reminder-notify/export'
         return String(digest.message || '').split('\n').join(' / ')
       }
 
+      function recurringFetch(options) {
+        setRecurringBusy(true)
+        return fetch(RECUR_ROUTE, options)
+          .then((res) => res.json())
+          .then((data) => {
+            setRecurring(data && data.ok ? data : null)
+          })
+          .catch(() => setRecurring(null))
+          .finally(() => setRecurringBusy(false))
+      }
+
+      function refreshRecurring() {
+        recurringFetch({ headers: { accept: 'application/json' } })
+      }
+
+      function cancelRecurring(id) {
+        return recurringFetch({
+          method: 'POST',
+          headers: { 'content-type': 'application/json', accept: 'application/json' },
+          body: JSON.stringify({ action: 'cancel', id }),
+        })
+      }
+
       function refreshHistory() {
         historyFetch({ headers: { accept: 'application/json' } })
       }
@@ -1352,6 +1397,21 @@ const EXPORT_ROUTE = '/dsh-reminder-notify/export'
         }
       }
 
+      function barsOf(buckets) {
+        const list = Array.isArray(buckets) ? buckets.slice(-30) : []
+        const max = list.reduce((top, item) => Math.max(top, Number(item && item.count) || 0), 0)
+        return list.map((item, index) => {
+          const count = Number(item && item.count) || 0
+          const height = max > 0 ? Math.round((count / max) * 100) : 0
+          return h('span', {
+            key: 'b' + index,
+            className: 'drn-bar',
+            title: `${(item && item.date) || ''} · ${count}`,
+            style: { height: `${Math.max(height, count > 0 ? 8 : 2)}%` },
+          })
+        })
+      }
+
       function historyText() {
         const label = typeof t === 'function' ? t : (key) => key
         if (history === null) return label('historyLoading')
@@ -1363,6 +1423,19 @@ const EXPORT_ROUTE = '/dsh-reminder-notify/export'
         const total = Number(stats.total) || 0
         const today = Number(stats.today) || 0
         return label('historyTotalPrefix') + total + label('historyTotalMid') + today + label('historyTotalSuffix')
+      }
+
+      function recurringEveryText(job) {
+        const minutes = Number(job && job.everyMinutes) || 0
+        const text =
+          minutes >= 1440 && minutes % 1440 === 0
+            ? `${minutes / 1440} 天`
+            : minutes >= 60 && minutes % 60 === 0
+              ? `${minutes / 60} 小时`
+              : `${minutes} 分钟`
+        const title = (job && job.title) || (job && job.message) || ''
+        const short = String(title).slice(0, 24)
+        return `每 ${text} · ${short}`
       }
 
       function entryText(entry) {
@@ -1529,7 +1602,67 @@ const EXPORT_ROUTE = '/dsh-reminder-notify/export'
               ),
             ),
           )
+          const buckets = history && history.stats ? history.stats.last30 : null
+          rows.push(
+            h(
+              'div',
+              { className: 'drn-row', key: 'history-chart' },
+              h(
+                'div',
+                { className: 'drn-row-main' },
+                h('div', { className: 'drn-label' }, label('historyChart')),
+                h('div', { className: 'drn-bars' }, barsOf(buckets)),
+                h('div', { className: 'drn-hint' }, label('historyChartHint')),
+              ),
+            ),
+          )
           const entries = history && Array.isArray(history.entries) ? history.entries.slice(0, 8) : []
+          const jobs = recurring && Array.isArray(recurring.jobs) ? recurring.jobs : []
+          rows.push(
+            h(
+              'div',
+              { className: 'drn-row', key: 'recurring-list' },
+              h(
+                'div',
+                { className: 'drn-row-main' },
+                h('div', { className: 'drn-label' }, label('recurringTitle')),
+                jobs.length === 0
+                  ? h('div', { className: 'drn-hint' }, label('recurringNone'))
+                  : jobs.map((job, index) =>
+                      h(
+                        'div',
+                        { className: 'drn-hint', key: 'job' + index },
+                        `${recurringEveryText(job)} · ${label('recurringNext')} ${shortTime(Date.parse(job.nextAt))}`,
+                      ),
+                    ),
+                h('div', { className: 'drn-hint' }, label('recurringHint')),
+              ),
+              jobs.length === 0
+                ? null
+                : h(
+                    'div',
+                    { className: 'drn-pick' },
+                    h(
+                      'button',
+                      { type: 'button', className: 'drn-btn drn-digest-btn', disabled: recurringBusy, onClick: refreshRecurring },
+                      label('recurringRefresh'),
+                    ),
+                    h(
+                      'button',
+                      {
+                        type: 'button',
+                        className: 'drn-btn drn-digest-btn',
+                        disabled: recurringBusy,
+                        onClick: () => {
+                          const job = jobs[jobs.length - 1]
+                          if (job) cancelRecurring(job.id)
+                        },
+                      },
+                      label('recurringCancel'),
+                    ),
+                  ),
+            ),
+          )
           if (entries.length > 0) {
             rows.push(
               h(

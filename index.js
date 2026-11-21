@@ -90,6 +90,8 @@ export const Config = z === null ? undefined : z.object({
   compactOnFullscreen: z.boolean().default(true).description('检测到全屏程序（游戏 / 视频）时自动缩成一条小卡片').volatile(),
   historyEnabled: z.boolean().default(true).description('记录提醒历史（本地 JSON），供插件页看统计').volatile(),
   historyLimit: z.number().min(20).max(2000).step(10).default(200).description('历史最多保留多少条（20–2000）').volatile(),
+  recurringEnabled: z.boolean().default(true).description('允许「每 30 分钟提醒一次」这类周期提醒').volatile(),
+  recurringFile: z.string().default('').description('周期提醒的存档文件，留空 = <用户目录>\.dsh\dsh-reminder-notify\recurring.json').volatile(),
   historyFile: z.string().default('').description('历史文件路径，留空 = <用户目录>\\.dsh\\dsh-reminder-notify\\history.json').volatile(),
   digestEnabled: z.boolean().default(false).description('每天在固定时间弹一条「今日提醒日报」').volatile(),
   digestTime: z.string().default('09:00').description('日报时间，HH:MM（每天只在过点后的第一次检查里发一条）').volatile(),
@@ -287,6 +289,8 @@ function settingsOf(config) {
     historyEnabled: c.historyEnabled !== false,
     historyLimit: Math.round(clamp(num(c.historyLimit, 200), 20, 2000)),
     historyFile: str(c.historyFile, ''),
+    recurringEnabled: c.recurringEnabled !== false,
+    recurringFile: str(c.recurringFile, ''),
     digestEnabled: c.digestEnabled === true,
     digestTime: str(c.digestTime, '09:00'),
     digestTitle: str(c.digestTitle, '今日提醒日报'),
@@ -484,6 +488,84 @@ function appendHistory(settings, entry) {
 }
 
 // "22:00" → 1320（当天第几分钟）；解析不出来返回 null。
+// "30m" / "2h" / "1d" → 分钟数；解析不出来返回 null。周期提醒用。
+export function parseEvery(text) {
+  const found = /^(\d{1,4})\s*([mhd])$/i.exec(String(text ?? '').trim())
+  if (found === null) return null
+  const amount = Number(found[1])
+  if (!Number.isFinite(amount) || amount <= 0) return null
+  const unit = found[2].toLowerCase()
+  const minutes = unit === 'm' ? amount : unit === 'h' ? amount * 60 : amount * 1440
+  if (minutes < 1 || minutes > 10080) return null
+  return minutes
+}
+
+// 上一次的点 + 周期，跳过所有已经错过的点，给出下一个将来时刻。
+export function nextRunAfter(prevMs, everyMinutes, nowMs) {
+  const step = Math.max(1, Math.round(everyMinutes)) * 60000
+  let next = prevMs + step
+  let guard = 0
+  while (next <= nowMs && guard < 10000) {
+    next += step
+    guard += 1
+  }
+  return next
+}
+
+function recurringPathOf(settings) {
+  if (settings.recurringFile !== '') return path.resolve(settings.recurringFile)
+  return path.join(os.homedir(), '.dsh', 'dsh-reminder-notify', 'recurring.json')
+}
+
+export function readRecurring(settings) {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(recurringPathOf(settings), 'utf8'))
+    return Array.isArray(parsed) ? parsed : []
+  } catch {
+    return []
+  }
+}
+
+export function writeRecurring(settings, list) {
+  const file = recurringPathOf(settings)
+  fs.mkdirSync(path.dirname(file), { recursive: true })
+  fs.writeFileSync(file, JSON.stringify(list), 'utf8')
+}
+
+export function publicRecurring(job) {
+  return {
+    id: job.id,
+    kind: job.kind,
+    title: job.title,
+    message: job.message,
+    everyMinutes: job.everyMinutes,
+    remaining: job.remaining,
+    nextAt: new Date(job.nextAt).toISOString(),
+  }
+}
+
+export function createRecurring(settings, item, now = Date.now()) {
+  if (settings.recurringEnabled !== true) return { ok: false, error: 'recurring-disabled' }
+  const everyMinutes = Math.max(1, Math.round(Number(item.everyMinutes) || 0))
+  const job = {
+    id: `r${now.toString(36)}${Math.random().toString(36).slice(2, 6)}`,
+    kind: KINDS.includes(item.kind) ? item.kind : 'raw',
+    title: str(item.title, ''),
+    message: str(item.message, ''),
+    seconds: num(item.seconds, 0),
+    sound: item.sound === false ? false : undefined,
+    url: str(item.url, ''),
+    everyMinutes,
+    remaining: Math.max(0, Math.round(Number(item.times) || 0)),
+    nextAt: now + everyMinutes * 60000,
+    createdAt: now,
+  }
+  const list = readRecurring(settings)
+  list.push(job)
+  writeRecurring(settings, list)
+  return { ok: true, recurring: publicRecurring(job) }
+}
+
 export function parseClock(text) {
   const found = /^(\d{1,2}):(\d{2})$/.exec(String(text ?? '').trim())
   if (found === null) return null
@@ -703,6 +785,15 @@ async function notify(kind, args, settings) {
     return { ok: false, error: 'only-windows', detail: '桌面提醒只能在本机 Windows 上弹出' }
   }
 
+  const everyMinutes = parseEvery(args.every)
+  if (everyMinutes !== null) {
+    return createRecurring(
+      settings,
+      { kind, title: args.title, message: args.message, seconds: args.seconds, sound: args.sound, url: args.url, everyMinutes, times: args.times },
+      Date.now(),
+    )
+  }
+
   const plainTitle = str(args.title, DEFAULT_TITLES[kind])
   const plainMessage = str(args.message, DEFAULT_MESSAGES[kind])
   const vars = { title: plainTitle, message: plainMessage, kind, time: clockText(new Date()) }
@@ -906,6 +997,15 @@ const parameters = {
       type: 'number',
       description: '定时提醒：多少分钟之后弹（1–10080）。和 at 同时给时以 inMinutes 为准。',
     },
+    every: {
+      type: 'string',
+      description:
+        '周期提醒：「30m」「2h」「1d」（最短 1 分钟、最长 7 天）。第一次在 now+every 之后弹，之后按这个间隔重复；配合 times 限制次数，与 at / inMinutes 互斥。',
+    },
+    times: {
+      type: 'number',
+      description: '周期提醒最多响几次；0 或不传表示一直重复。可用 /dsh-reminder-notify/recurring 查询或取消。',
+    },
   },
 }
 
@@ -953,6 +1053,7 @@ const BALANCE_ROUTE = '/dsh-reminder-notify/balance'
 const HISTORY_ROUTE = '/dsh-reminder-notify/history'
 const EXPORT_ROUTE = '/dsh-reminder-notify/export'
 const DIGEST_ROUTE = '/dsh-reminder-notify/digest'
+const RECUR_ROUTE = '/dsh-reminder-notify/recurring'
 
 // 面板要「把音频目录里的文件列成下拉」，但 Client 侧没有任何读文件能力，
 // 所以由 Host 注册一条只读的 GET 路由，页面用同源 fetch 取这个 JSON。
@@ -2351,6 +2452,92 @@ function registerTrayRoute(ctx, getSettings) {
   mountRoute(ctx, route, 'dsh-reminder-notify: tray route')
 }
 
+function registerRecurringRoute(ctx, getSettings) {
+  const reply = (res, status, payload) => {
+    res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+    res.end(JSON.stringify(payload))
+  }
+  const route = {
+    kind: 'exact',
+    path: RECUR_ROUTE,
+    handler: async (req, res) => {
+      try {
+        const settings = getSettings()
+        const method = (req.method ?? 'GET').toUpperCase()
+        if (method === 'GET') {
+          const jobs = readRecurring(settings).map(publicRecurring)
+          return reply(res, 200, { ok: true, enabled: settings.recurringEnabled, count: jobs.length, jobs })
+        }
+        if (method !== 'POST') return reply(res, 405, { ok: false, error: 'use GET or POST' })
+        const body = await readJsonBody(req)
+        const action = str(body?.action, 'list')
+        if (action === 'cancel') {
+          const id = str(body?.id, '')
+          const list = readRecurring(settings)
+          const left = list.filter((job) => job.id !== id)
+          writeRecurring(settings, left)
+          return reply(res, 200, { ok: true, action, removed: list.length - left.length, count: left.length })
+        }
+        if (action === 'cancel-all') {
+          const list = readRecurring(settings)
+          writeRecurring(settings, [])
+          return reply(res, 200, { ok: true, action, removed: list.length, count: 0 })
+        }
+        const jobs = readRecurring(settings).map(publicRecurring)
+        return reply(res, 200, { ok: true, action, count: jobs.length, jobs })
+      } catch (error) {
+        return reply(res, 500, { ok: false, error: String(error?.message ?? error) })
+      }
+    },
+  }
+  mountRoute(ctx, route, 'dsh-reminder-notify: recurring route')
+}
+
+// 周期提醒：每 30 秒看一次，到点的先弹卡，再按周期排下一次；times 用完就删。
+function registerRecurringLoop(ctx, getSettings) {
+  let running = false
+  const tick = async () => {
+    if (running) return
+    running = true
+    try {
+      const settings = getSettings()
+      if (settings.recurringEnabled !== true) return
+      const list = readRecurring(settings)
+      if (list.length === 0) return
+      const now = Date.now()
+      const keep = []
+      let changed = false
+      for (const job of list) {
+        const dueAt = num(job?.nextAt, 0)
+        if (!(dueAt > 0) || dueAt > now) {
+          keep.push(job)
+          continue
+        }
+        const jobSettings = getSettings()
+        await notify(
+          job.kind,
+          { title: job.title, message: job.message, seconds: job.seconds, sound: job.sound, url: job.url },
+          { ...jobSettings, quietEnabled: jobSettings.quietEnabled },
+        ).catch(() => {})
+        changed = true
+        const remaining = job.remaining > 0 ? job.remaining - 1 : 0
+        if (job.remaining > 0 && remaining <= 0) continue
+        keep.push({ ...job, remaining, nextAt: nextRunAfter(dueAt, job.everyMinutes, Date.now()) })
+      }
+      if (changed) writeRecurring(settings, keep)
+    } catch {
+      /* 周期提醒出错不影响下一轮 */
+    } finally {
+      running = false
+    }
+  }
+  const timer = setInterval(() => {
+    void tick()
+  }, 30 * 1000)
+  if (typeof timer?.unref === 'function') timer.unref()
+  ctx.effect(() => () => clearInterval(timer), 'dsh-reminder-notify: recurring watcher')
+}
+
 function packageVersion() {
   try {
     return JSON.parse(fs.readFileSync(path.join(PACKAGE_ROOT, 'package.json'), 'utf8')).version
@@ -2426,6 +2613,8 @@ export function apply(ctx, config) {
   registerDigestLoop(ctx, () => settingsOf(config))
   registerConditionLoop(ctx, () => settingsOf(config))
   registerTrayRoute(ctx, () => settingsOf(config))
+  registerRecurringRoute(ctx, () => settingsOf(config))
+  registerRecurringLoop(ctx, () => settingsOf(config))
   registerDoctorRoute(ctx, () => settingsOf(config))
   const tools = typeof ctx.get === 'function' ? ctx.get('tools') : ctx.tools
   if (tools === undefined || tools === null || typeof tools.register !== 'function') {

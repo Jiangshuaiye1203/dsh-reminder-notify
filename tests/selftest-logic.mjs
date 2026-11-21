@@ -1,6 +1,6 @@
 // 纯逻辑自检：不弹窗口、不碰文件，只验证免打扰时段计算和历史统计。
 // 跑法：node tests/selftest-logic.mjs
-import { condStateAfter, digestDue, digestMessage, doctorReport, evaluateConditions, historyStats, inQuietHours, parseClock, pushPayload, quietEndAt, todayKey, toastArgsOf } from '../index.js'
+import { condStateAfter, digestDue, digestMessage, doctorReport, evaluateConditions, historyStats, inQuietHours, nextRunAfter, parseClock, parseEvery, pushPayload, quietEndAt, todayKey, toastArgsOf } from '../index.js'
 
 let failed = 0
 function check(label, actual, expected) {
@@ -134,6 +134,19 @@ check('json 报文', [generic.title, generic.message, generic.kind], ['T', 'M', 
 const toast = toastArgsOf({ toastSeconds: 99 }, 'decide', 'T', 'M')
 check('系统通知秒数夹到 60', [toast.seconds, toast.icon], [60, 'Warning'])
 check('系统通知默认 Information', toastArgsOf({}, 'raw', 'T', 'M').icon, 'Information')
+
+// —— 周期提醒 ——
+check('parseEvery 30m', parseEvery('30m'), 30)
+check('parseEvery 2h', parseEvery('2h'), 120)
+check('parseEvery 1d', parseEvery('1d'), 1440)
+check('parseEvery 带空格', parseEvery(' 45 m '), 45)
+check('parseEvery 0 分钟 -> null', parseEvery('0m'), null)
+check('parseEvery 8 天超上限 -> null', parseEvery('8d'), null)
+check('parseEvery 乱写 -> null', parseEvery('每半小时'), null)
+const t0 = 1795200000000
+check('nextRunAfter 正常加一个周期', nextRunAfter(t0, 30, t0 + 60 * 1000), t0 + 30 * 60 * 1000)
+check('nextRunAfter 跳过错过很多个', nextRunAfter(t0, 30, t0 + 3 * 3600 * 1000), t0 + 210 * 60 * 1000)
+check('nextRunAfter 到点前不跳', nextRunAfter(t0, 60, t0 + 60 * 1000), t0 + 60 * 60 * 1000)
 
 if (failed > 0) {
   console.log(`\n${failed} 项失败`)

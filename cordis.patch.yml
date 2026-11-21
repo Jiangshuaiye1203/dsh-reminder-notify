@@ -123,3 +123,7 @@
         trayHotkey: Ctrl+Alt+R
         # 托盘状态文件（留空 = 用户目录下 .dsh/dsh-reminder-notify/tray.json）
         trayStateFile: ''
+        # 周期提醒（「每 30 分钟提醒一次」）
+        recurringEnabled: true
+        # 周期任务存档文件（留空 = 用户目录下 .dsh/dsh-reminder-notify/recurring.json）
+        recurringFile: ''
