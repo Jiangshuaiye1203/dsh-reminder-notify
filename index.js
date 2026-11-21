@@ -129,6 +129,46 @@ const BUNDLED_AUDIO_DIR = path.join(PACKAGE_ROOT, 'assets', '提示音导入')
 const EXE_NAME = 'Harness完成提醒.exe'
 const AUDIO_SUBDIR = '提示音导入'
 
+// webServer 在冷启动时可能还没就绪（apply 早于它初始化），此前各路由直接 return，
+// 结果整场会话里面板 / 托盘 / 自检路由全部 404。这里改成「就绪即挂」：
+// 先试一次，不行就每 250ms 重试，最多等 60 秒；插件卸载时清掉定时器。
+export function mountRoute(ctx, route, label) {
+  const readWeb = () => (typeof ctx.get === 'function' ? ctx.get('webServer') : undefined)
+  const ready = () => {
+    const web = readWeb()
+    return web !== undefined && web !== null && typeof web.register === 'function' ? web : null
+  }
+  const attach = (web) => {
+    try {
+      const dispose = web.register(route)
+      ctx.effect(() => (typeof dispose === 'function' ? dispose : () => {}), `dsh-reminder-notify: ${label}`)
+    } catch (error) {
+      ctx.logger?.warn?.(`dsh-reminder-notify: ${label} 注册失败：${String(error && error.message ? error.message : error)}`)
+    }
+  }
+  const now = ready()
+  if (now !== null) {
+    attach(now)
+    return
+  }
+  let waited = 0
+  const timer = setInterval(() => {
+    waited += 250
+    const web = ready()
+    if (web === null) {
+      if (waited >= 60000) {
+        clearInterval(timer)
+        ctx.logger?.warn?.(`dsh-reminder-notify: webServer 一直不可用（等了 60 秒），${label} 没有注册`)
+      }
+      return
+    }
+    clearInterval(timer)
+    attach(web)
+  }, 250)
+  if (typeof timer?.unref === 'function') timer.unref()
+  ctx.effect(() => () => clearInterval(timer), `dsh-reminder-notify: ${label} watcher`)
+}
+
 const KINDS = ['done', 'decide', 'raw']
 const POSITIONS = new Set(['br', 'center', 'tr'])
 // 脚本宿主额外支持左上、底部居中；exe 宿主只有 br/center/tr，两个模式的交集就是上面这三个。
@@ -934,11 +974,6 @@ export function listAudioFiles(dir) {
 }
 
 function registerAudioRoute(ctx, getSettings) {
-  const web = typeof ctx.get === 'function' ? ctx.get('webServer') : undefined
-  if (web === undefined || web === null || typeof web.register !== 'function') {
-    ctx.logger?.warn?.('dsh-reminder-notify: webServer is unavailable, the audio list dropdown stays manual-entry only')
-    return
-  }
   const route = {
     kind: 'exact',
     path: AUDIO_ROUTE,
@@ -958,12 +993,7 @@ function registerAudioRoute(ctx, getSettings) {
       res.end(body)
     },
   }
-  ctx.effect(() => {
-    const dispose = web.register(route)
-    return () => {
-      if (typeof dispose === 'function') dispose()
-    }
-  }, 'dsh-reminder-notify: audio list route')
+  mountRoute(ctx, route, 'dsh-reminder-notify: audio list route')
 }
 
 // 试听：只按档位放一遍提示音，不弹卡。面板拿不到本地音频文件，所以由宿主代播。
@@ -1032,11 +1062,6 @@ function readJsonBody(req, limit = 256 * 1024) {
 }
 
 function registerConfigRoute(ctx, getSettings) {
-  const web = typeof ctx.get === 'function' ? ctx.get('webServer') : undefined
-  if (web === undefined || web === null || typeof web.register !== 'function') {
-    ctx.logger?.warn?.('dsh-reminder-notify: webServer is unavailable, the settings panel stays read-only')
-    return
-  }
   const editable = new Set(Object.keys(settingsOf({})))
   const reply = (res, status, payload) => {
     res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
@@ -1073,20 +1098,10 @@ function registerConfigRoute(ctx, getSettings) {
       }
     },
   }
-  ctx.effect(() => {
-    const dispose = web.register(route)
-    return () => {
-      if (typeof dispose === 'function') dispose()
-    }
-  }, 'dsh-reminder-notify: settings route')
+  mountRoute(ctx, route, 'dsh-reminder-notify: settings route')
 }
 
 function registerPreviewRoute(ctx, getSettings) {
-  const web = typeof ctx.get === 'function' ? ctx.get('webServer') : undefined
-  if (web === undefined || web === null || typeof web.register !== 'function') {
-    ctx.logger?.warn?.('dsh-reminder-notify: webServer is unavailable, the preview buttons stay hidden')
-    return
-  }
   const reply = (res, status, payload) => {
     res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
     res.end(JSON.stringify(payload))
@@ -1128,12 +1143,7 @@ function registerPreviewRoute(ctx, getSettings) {
       }
     },
   }
-  ctx.effect(() => {
-    const dispose = web.register(route)
-    return () => {
-      if (typeof dispose === 'function') dispose()
-    }
-  }, 'dsh-reminder-notify: preview route')
+  mountRoute(ctx, route, 'dsh-reminder-notify: preview route')
 }
 
 // ——— DeepSeek 余额提醒 ——————————————————————————————————————————————
@@ -1324,7 +1334,6 @@ export async function checkBalance(ctx, getSettings, { force = false } = {}) {
 }
 
 function registerBalanceRoute(ctx, getSettings, config) {
-  const web = typeof ctx.get === 'function' ? ctx.get('webServer') : undefined
   const replyOf = (res) => (status, payload) => {
     res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
     res.end(JSON.stringify(payload))
@@ -1343,7 +1352,7 @@ function registerBalanceRoute(ctx, getSettings, config) {
     at: balanceState.at,
     error: balanceState.error,
   })
-  if (web !== undefined && web !== null && typeof web.register === 'function') {
+  {
     const route = {
       kind: 'exact',
       path: BALANCE_ROUTE,
@@ -1386,14 +1395,7 @@ function registerBalanceRoute(ctx, getSettings, config) {
         }
       },
     }
-    ctx.effect(() => {
-      const dispose = web.register(route)
-      return () => {
-        if (typeof dispose === 'function') dispose()
-      }
-    }, 'dsh-reminder-notify: balance route')
-  } else {
-    ctx.logger?.warn?.('dsh-reminder-notify: webServer is unavailable, the balance card stays read-only')
+    mountRoute(ctx, route, 'dsh-reminder-notify: balance route')
   }
 
   // 自动检查：每 60 秒醒一次，按 balanceCheckMinutes 的间隔真正查一次。
@@ -1630,11 +1632,6 @@ function registerDigestLoop(ctx, getSettings) {
 }
 
 function registerDigestRoute(ctx, getSettings) {
-  const web = typeof ctx.get === 'function' ? ctx.get('webServer') : undefined
-  if (web === undefined || web === null || typeof web.register !== 'function') {
-    ctx.logger?.warn?.('dsh-reminder-notify: webServer is unavailable, the digest panel stays hidden')
-    return
-  }
   const reply = (res, status, payload) => {
     res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
     res.end(JSON.stringify(payload))
@@ -1674,12 +1671,7 @@ function registerDigestRoute(ctx, getSettings) {
       }
     },
   }
-  ctx.effect(() => {
-    const dispose = web.register(route)
-    return () => {
-      if (typeof dispose === 'function') dispose()
-    }
-  }, 'dsh-reminder-notify: digest route')
+  mountRoute(ctx, route, 'dsh-reminder-notify: digest route')
 }
 
 /** 宿主健康：最近一次退出码 / 结果 / 失败原因，供自诊断面板与 doctor 路由读取。 */
@@ -1915,11 +1907,6 @@ async function withGithubProbe(report) {
 }
 
 function registerDoctorRoute(ctx, getSettings) {
-  const web = typeof ctx.get === 'function' ? ctx.get('webServer') : undefined
-  if (web === undefined || web === null || typeof web.register !== 'function') {
-    ctx.logger?.warn?.('dsh-reminder-notify: webServer is unavailable, the doctor panel stays hidden')
-    return
-  }
   const reply = (res, status, payload) => {
     res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
     res.end(JSON.stringify(payload))
@@ -1954,12 +1941,7 @@ function registerDoctorRoute(ctx, getSettings) {
       }
     },
   }
-  ctx.effect(() => {
-    const dispose = web.register(route)
-    return () => {
-      if (typeof dispose === 'function') dispose()
-    }
-  }, 'dsh-reminder-notify: doctor route')
+  mountRoute(ctx, route, 'dsh-reminder-notify: doctor route')
 }
 
 // 0.17：历史导出 —— 面板点一下，CSV/JSON 落到桌面，方便拿去算账或贴给别人。
@@ -1997,14 +1979,12 @@ function exportHistoryFile(settings, entries, format, days) {
 }
 
 function registerExportRoute(ctx, getSettings) {
-  const web = ctx.get('webServer')
-  if (web === null || web === undefined || typeof web.register !== 'function') return
   const reply = (res, status, payload) => {
     res.statusCode = status
     res.setHeader('content-type', 'application/json; charset=utf-8')
     res.end(JSON.stringify(payload))
   }
-  const dispose = web.register({
+  const route = {
     kind: 'exact',
     path: EXPORT_ROUTE,
     handler: (req, res) => {
@@ -2019,16 +1999,11 @@ function registerExportRoute(ctx, getSettings) {
         reply(res, 500, { ok: false, error: 'export-failed', detail: String(error?.message ?? error) })
       }
     },
-  })
-  ctx.effect(() => dispose, 'dsh-reminder-notify: history export route')
+  }
+  mountRoute(ctx, route, 'dsh-reminder-notify: history export route')
 }
 
 function registerHistoryRoute(ctx, getSettings) {
-  const web = typeof ctx.get === 'function' ? ctx.get('webServer') : undefined
-  if (web === undefined || web === null || typeof web.register !== 'function') {
-    ctx.logger?.warn?.('dsh-reminder-notify: webServer is unavailable, the history panel stays hidden')
-    return
-  }
   const reply = (res, status, payload) => {
     res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
     res.end(JSON.stringify(payload))
@@ -2062,12 +2037,7 @@ function registerHistoryRoute(ctx, getSettings) {
       }
     },
   }
-  ctx.effect(() => {
-    const dispose = web.register(route)
-    return () => {
-      if (typeof dispose === 'function') dispose()
-    }
-  }, 'dsh-reminder-notify: history route')
+  mountRoute(ctx, route, 'dsh-reminder-notify: history route')
 }
 
 /** Host 服务名：别的插件用 ctx.get('reminder') 拿它。 */
@@ -2346,11 +2316,6 @@ function registerConditionLoop(ctx, getSettings) {
 }
 
 function registerTrayRoute(ctx, getSettings) {
-  const web = typeof ctx.get === 'function' ? ctx.get('webServer') : undefined
-  if (web === undefined || web === null || typeof web.register !== 'function') {
-    ctx.logger?.warn?.('dsh-reminder-notify: webServer is unavailable, the tray panel stays hidden')
-    return
-  }
   const reply = (res, status, payload) => {
     res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
     res.end(JSON.stringify(payload))
@@ -2383,12 +2348,7 @@ function registerTrayRoute(ctx, getSettings) {
       }
     },
   }
-  ctx.effect(() => {
-    const dispose = web.register(route)
-    return () => {
-      if (typeof dispose === 'function') dispose()
-    }
-  }, 'dsh-reminder-notify: tray route')
+  mountRoute(ctx, route, 'dsh-reminder-notify: tray route')
 }
 
 function packageVersion() {
