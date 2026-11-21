@@ -3,7 +3,7 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { mobileProxyPathOk, httpsLinkOf, mobileBarsOf, mobileCsvOf, mobileSettingsPatch, mobileViewOf, attachmentSummaryOf, mobileAttachmentsOf, uploadNameFor, condStateAfter, choicePromptText, choicesArgOf, normalizeChoices, resetChoiceSeen, unreadChoices, customButtonsOf, customButtonsSpec, escapeHtml, mobileLinkOf, mobilePageOf, phonePromptText, repliesOf, resetPhoneSeen, unreadPhoneReplies, digestDue, digestShownToday, digestMessage, doctorReport, evaluateConditions, historyStats, inQuietHours, nextRunAfter, parseClock, parseCustomButtons, parseEvery, pushPayload, quietEndAt, todayKey, toastArgsOf, feedbackEntryOf, issueUrlOf, envSummaryOf, statsOf, feedbackPathOf, backupNow, listBackups, readBackup, backupDirOf, parseDays, daysLabelOf, nextRunWithDays, resolvedHostMode, nativeNotifyArgs, mobileAccessAllowed, manifestOf, sanitizeLabel, parseRules, ruleMatches, dueRules, reminderMetrics } from '../index.js'
+import { mobileProxyPathOk, httpsLinkOf, mobileBarsOf, mobileCsvOf, mobileSettingsPatch, mobileViewOf, attachmentSummaryOf, mobileAttachmentsOf, uploadNameFor, condStateAfter, choicePromptText, choicesArgOf, normalizeChoices, resetChoiceSeen, unreadChoices, customButtonsOf, customButtonsSpec, escapeHtml, mobileLinkOf, mobilePageOf, phonePromptText, repliesOf, resetPhoneSeen, unreadPhoneReplies, digestDue, digestShownToday, digestMessage, doctorReport, evaluateConditions, historyStats, inQuietHours, nextRunAfter, parseClock, parseCustomButtons, parseEvery, pushPayload, quietEndAt, todayKey, toastArgsOf, feedbackEntryOf, issueUrlOf, envSummaryOf, statsOf, feedbackPathOf, backupNow, listBackups, readBackup, backupDirOf, parseDays, daysLabelOf, nextRunWithDays, resolvedHostMode, nativeNotifyArgs, mobileAccessAllowed, manifestOf, sanitizeLabel, parseRules, ruleMatches, dueRules, reminderMetrics, parsePickTimes } from '../index.js'
 
 let failed = 0
 function check(label, actual, expected) {
@@ -521,6 +521,26 @@ check('统计：done 档位条数', metricResult.byKind.done.count, 2)
 check('统计：decide 有响应', metricResult.byKind.decide.responded, 1)
 check('统计：最慢档位', metricResult.slowestKind && metricResult.slowestKind.kind, 'done')
 check('统计：每日序列 7 天', metricResult.daily.length, 7)
+
+// ——— 0.37 卡片时间按钮 ————————————————————————————————
+const pickRel = parsePickTimes(['30 分钟', '2 小时', '45m'])
+check('时间按钮：相对分钟', pickRel.map((i) => i.minutes), [30, 120, 45])
+check('时间按钮：标签原样保留', pickRel[0].label, '30 分钟')
+check('时间按钮：最多三个', parsePickTimes(['1m', '2m', '3m', '4m']).length, 3)
+check('时间按钮：认不出的跳过', parsePickTimes(['瞎写', '15 分钟']).map((i) => i.minutes), [15])
+check('时间按钮：全认不出是空', parsePickTimes(['xxx']).length, 0)
+check('时间按钮：支持 | 分隔字符串', parsePickTimes('10 分钟|20 分钟').map((i) => i.minutes), [10, 20])
+const pickNowMs = Date.now()
+const clockPick = parsePickTimes(['23:59'])[0]
+const expectClock = (() => {
+  const target = new Date(pickNowMs)
+  target.setSeconds(0, 0)
+  target.setHours(23, 59, 0, 0)
+  if (target.getTime() <= pickNowMs) target.setDate(target.getDate() + 1)
+  return Math.round((target.getTime() - pickNowMs) / 60000)
+})()
+check('时间按钮：钟点按今天或明天算', Math.abs(clockPick.minutes - expectClock) <= 1, true)
+check('时间按钮：分钟数不小于 1', parsePickTimes(['0 分钟']).every((i) => i.minutes >= 1), true)
 
 if (failed > 0) { console.log('\n' + failed + ' 项失败'); process.exit(1) }
 console.log('\n全部通过')

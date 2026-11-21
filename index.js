@@ -549,6 +549,9 @@ function argvOfScriptHost(o) {
   if (o.speak) argv.push('-Speak', psSafe(o.speak))
   if (o.resultPath) argv.push('-ResultPath', o.resultPath)
   if (o.buttonsEnabled === false) argv.push('-NoButtons')
+  if (Array.isArray(o.pickTimes) && o.pickTimes.length > 0) {
+    argv.push('-Choices', o.pickTimes.map((item) => item.label).join('|'), '-ChoicesAreTimes')
+  }
   else argv.push('-SnoozeMinutes', String(o.snoozeMinutes))
   if (o.compact) argv.push('-Compact')
   if (o.autoCompact) argv.push('-AutoCompact')
@@ -556,7 +559,8 @@ function argvOfScriptHost(o) {
   if (o.openUrl) argv.push('-OpenUrl', String(o.openUrl))
   if (o.replyEnabled) argv.push('-Reply')
   if (o.customButtons) argv.push('-CustomButtons', String(o.customButtons))
-  if (o.choices) argv.push('-Choices', String(o.choices))
+  const hasPickTimes = Array.isArray(o.pickTimes) && o.pickTimes.length > 0
+  if (o.choices && !hasPickTimes) argv.push('-Choices', String(o.choices))
   if (o.allowOther && o.choices) argv.push('-ChoicesOther')
   if (o.focusAssistMute) argv.push('-RespectFocus')
   return argv
@@ -631,6 +635,41 @@ export function nextRunAfter(prevMs, everyMinutes, nowMs) {
 
 
 // 0.34：星期规则。'weekdays' 周一到周五；'weekend' 周六周日；'1,3,5' 指定星期（0=周日）；空 = 每天都行。
+export function parsePickTimes(input) {
+  const list = Array.isArray(input) ? input : typeof input === 'string' ? input.split('|') : []
+  const out = []
+  const now = new Date()
+  for (const raw of list) {
+    const label = String(raw ?? '').trim()
+    if (label === '') continue
+    let minutes = null
+    const relative = /^(\d{1,4})\s*(m|min|分钟|分)$/i.exec(label) ?? /^(\d{1,3})\s*(h|小时|钟头)$/i.exec(label)
+    const clock = /^(?:(今天|明天|today|tomorrow)\s*)?(\d{1,2})[:：](\d{2})$/.exec(label)
+    if (relative !== null) {
+      const value = Number(relative[1])
+      const unit = String(relative[2]).toLowerCase()
+      minutes = unit === 'h' || unit === '小时' || unit === '钟头' ? value * 60 : value
+    } else if (clock !== null) {
+      const hour = Number(clock[2])
+      const minute = Number(clock[3])
+      if (hour > 23 || minute > 59) continue
+      const target = new Date(now.getTime())
+      target.setSeconds(0, 0)
+      const mark = String(clock[1] ?? '').toLowerCase()
+      const tomorrow = mark === '明天' || mark === 'tomorrow'
+      if (tomorrow) target.setDate(target.getDate() + 1)
+      target.setHours(hour, minute, 0, 0)
+      if (!tomorrow && target.getTime() <= now.getTime()) target.setDate(target.getDate() + 1)
+      minutes = Math.round((target.getTime() - now.getTime()) / 60000)
+    }
+    if (minutes === null || !isFinite(minutes)) continue
+    minutes = Math.max(1, Math.min(10080, Math.round(minutes)))
+    out.push({ label: label.slice(0, 12), minutes })
+    if (out.length >= 3) break
+  }
+  return out
+}
+
 export function parseDays(text) {
   const raw = str(text, '').trim().toLowerCase()
   if (raw === '') return null
@@ -892,6 +931,7 @@ async function showItem(item) {
     replyEnabled: settings.replyEnabled,
     customButtons: customButtonsOf(settings, item),
     choices: choicesArgOf(item),
+    pickTimes: Array.isArray(item.pickTimes) ? item.pickTimes : null,
     allowOther: item.allowOther === true,
     focusAssistMute: settings.focusAssistMute,
     snoozeMinutes: settings.snoozeMinutes,
@@ -905,6 +945,8 @@ async function showItem(item) {
   let buttonLabel = ''
   let choiceText = ''
   let choiceOther = false
+  let pickLabel = ''
+  let pickMinutes = 0
   let focusAssist = false
   try {
     const { exited } = await launch(settings.powershellPath, argv, PACKAGE_ROOT)
@@ -916,13 +958,27 @@ async function showItem(item) {
   try {
     const parsed = JSON.parse(fs.readFileSync(resultFile, 'utf8'))
     if (parsed !== null && typeof parsed === 'object' && typeof parsed.action === 'string') {
-      action = parsed.action
+      action = parsed.action === 'pick' ? 'picked' : parsed.action
       if (typeof parsed.reply === 'string') replyText = parsed.reply.trim()
       if (typeof parsed.button === 'string') buttonLabel = parsed.button.trim()
       if (typeof parsed.choice === 'string') choiceText = parsed.choice.trim()
       if (parsed.choiceOther === true) choiceOther = true
+  if (typeof parsed.pick === 'string' && parsed.pick !== '') {
+    pickLabel = parsed.pick
+    const hit = (Array.isArray(item.pickTimes) ? item.pickTimes : []).find((entry) => entry.label === pickLabel)
+    if (hit !== undefined) pickMinutes = hit.minutes
+  }
       if (parsed.focusAssist === true) focusAssist = true
-      if (action === 'snooze') {
+      if (action === 'pick' && pickMinutes > 0) {
+    const waitMs = pickMinutes * 60 * 1000
+    const timer = setTimeout(() => {
+      queue.unshift({ ...item, snoozed: true, count: 1, holdUntil: 0, pickTimes: item.pickTimes })
+      pump()
+    }, waitMs)
+    if (typeof timer.unref === 'function') timer.unref()
+    info(`dsh-reminder-notify: 用户选了「${pickLabel}」，${pickMinutes} 分钟后再提醒`)
+  }
+  if (action === 'snooze') {
         const minutes = Math.round(clamp(num(parsed.snooze, settings.snoozeMinutes), 1, 240))
         const timer = setTimeout(() => {
           queue.unshift({ ...item, createdAt: Date.now(), snoozed: true, count: 1, holdUntil: 0 })
@@ -974,6 +1030,7 @@ async function showItem(item) {
     ...(choiceText !== '' ? { choice: choiceText } : {}),
     ...(choiceOther ? { choiceOther: true } : {}),
     ...(focusAssist ? { focusAssist: true } : {}),
+    ...(pickLabel !== '' ? { pick: pickLabel, pickMinutes } : {}),
   })
   // 0.20：用户在卡上回话 → 记一条服务事件，并按开关推到手机（fire-and-forget）
   if (action === 'replied' && replyText !== '') {
@@ -1219,6 +1276,7 @@ async function notify(kind, args, settings) {
     seconds,
     url: openUrl,
     buttons: Array.isArray(args.buttons) ? args.buttons.slice(0, 3) : undefined,
+    pickTimes: parsePickTimes(args.pickTimes),
     options: normalizeChoices(args.options),
     allowOther: args.allowOther === true,
     dueAt,
@@ -1325,6 +1383,11 @@ const parameters = {
       description:
         '决定卡上的候选按钮（2–4 个，每个最多 12 个字）。用户点了哪一个，就会记进历史并出现在你下一步的上下文里。只对 kind=decide 有意义。',
       items: { type: 'string' },
+    },
+    pickTimes: {
+      type: 'array',
+      items: { type: 'string' },
+      description: '卡片上的时间按钮（最多 3 个），点了就在那个时间再弹一次同样的提醒。可写 "30m"、"2h"、"18:00"、"明天 09:00"。与 options 二选一。',
     },
     allowOther: {
       type: 'boolean',

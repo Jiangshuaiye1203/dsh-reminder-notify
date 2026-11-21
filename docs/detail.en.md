@@ -4,3 +4,4 @@ Adds a `notify_user` tool to DeepSeek Harness: a "done" card when a task finishe
 
 **Everything is configured in the panel below**: the first row of "Basic" holds the three sample cards, other groups expand when you click their title, and everything else is under "How it works (expand to read)". Release notes live in the README.
 - 0.36: custom rules (JSON, validated before saving) and response-speed stats (avg / median / ignored share, split by kind).
+- 0.37: cards can carry time buttons (`pickTimes`) — one tap re-fires the same card at that time.

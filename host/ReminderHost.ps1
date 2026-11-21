@@ -41,6 +41,7 @@ param(
     [string]$CustomButtons = '',
     [string]$Choices = '',
     [switch]$ChoicesOther,
+    [switch]$ChoicesAreTimes,
     [switch]$RespectFocus,
     [switch]$Compact,
     [switch]$AutoCompact,
@@ -397,6 +398,7 @@ $script:replyRect = $null
 $script:replyText = ''
 $script:choiceLabel = ''
 $script:choiceOther = $false
+$script:pickLabel = ''
 if ($showReply) {
     $boxTop = $height - $padX - $buttonsHeight - 6 - $customRowHeight - $choiceRowHeight - 26
     $boxWidth = $width - $accentWidth - $padX - $padX
@@ -478,6 +480,7 @@ $form.Add_Paint({
     if ($QueueLeft -gt 0) { $hint = $hint + (' · 还有 {0} 条' -f $QueueLeft) }
     if (-not $showButtons) { $hint = $hint + ' · 点一下关掉' }
     if ($showReply) { $hint = $hint + ' · 输入后按 Enter 回话' }
+    if ($ChoicesAreTimes -and $choiceList.Count -gt 0) { $hint = $hint + ' · 点时间是排一个定时提醒' }
     if ($script:focusAssist) { $hint = $hint + ' · 专注中已静音' }
     $hintBrush = New-Object System.Drawing.SolidBrush $mutedColor
     $hintTop = $height - $padX - 12 - $buttonsHeight - $customRowHeight - $choiceRowHeight - $replyHeight
@@ -674,11 +677,16 @@ $form.Add_MouseDown({
         }
     }
 
-    # 决定卡候选项（点了就当作「选它」）
+    # 候选行：时间模式下是「排一个提醒」，否则是「选它」
     foreach ($pair in $script:choiceRects) {
         if ($pair[0].Contains($e.X, $e.Y)) {
-            $script:choiceLabel = $choiceList[$pair[1]]
-            Close-With 'choice'
+            if ($ChoicesAreTimes) {
+                $script:pickLabel = $choiceList[$pair[1]]
+                Close-With 'pick'
+            } else {
+                $script:choiceLabel = $choiceList[$pair[1]]
+                Close-With 'choice'
+            }
             return
         }
     }
@@ -836,6 +844,7 @@ if (-not [string]::IsNullOrEmpty($ResultPath)) {
             button    = $(if ($script:action -eq 'custom') { $script:btnLabel } else { '' })
             choice    = $(if ($script:action -eq 'choice' -or $script:choiceOther) { $script:choiceLabel } else { '' })
             choiceOther = [bool]$script:choiceOther
+            pick        = $(if ($script:action -eq 'pick') { $script:pickLabel } else { '' })
             focusAssist = $script:focusAssist
         }
         $json = ($payload | ConvertTo-Json -Compress)
