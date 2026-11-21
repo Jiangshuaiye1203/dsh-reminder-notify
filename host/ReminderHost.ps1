@@ -388,7 +388,7 @@ $script:replyRect = $null
 $script:replyText = ''
 $script:choiceLabel = ''
 if ($showReply) {
-    $boxTop = $height - $padX - $buttonsHeight - 6 - $customRowHeight - 26
+    $boxTop = $height - $padX - $buttonsHeight - 6 - $customRowHeight - $choiceRowHeight - 26
     $boxWidth = $width - $accentWidth - $padX - $padX
     $box = New-Object System.Windows.Forms.TextBox
     $box.BorderStyle = [System.Windows.Forms.BorderStyle]::FixedSingle
@@ -470,7 +470,7 @@ $form.Add_Paint({
     if ($showReply) { $hint = $hint + ' · 输入后按 Enter 回话' }
     if ($script:focusAssist) { $hint = $hint + ' · 专注中已静音' }
     $hintBrush = New-Object System.Drawing.SolidBrush $mutedColor
-    $hintTop = $height - $padX - 12 - $buttonsHeight - $customRowHeight - $replyHeight
+    $hintTop = $height - $padX - 12 - $buttonsHeight - $customRowHeight - $choiceRowHeight - $replyHeight
     $g.DrawString($hint, $hintFont, $hintBrush, $textLeft, $hintTop)
     $hintBrush.Dispose()
 
