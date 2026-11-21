@@ -1202,12 +1202,17 @@ export function httpsLinkOf(settings, host, lan = null) {
   return `https://${address}:${port}${MOBILE_ROUTE}?t=${encodeURIComponent(token)}`
 }
 
+let httpsWarned = false
+
 export function startHttpsProxy(ctx, getSettings) {
   const settings = getSettings()
   if (settings.httpsEnabled !== true) return null
   const pfxPath = httpsPfxPathOf(settings)
   if (!fs.existsSync(pfxPath)) {
-    warn(`mobile https: 证书不存在（${pfxPath}），先跑 scripts/make-cert.ps1`)
+    if (!httpsWarned) {
+      httpsWarned = true
+      warn(`mobile https: 证书不存在（${pfxPath}），先跑 scripts/make-cert.ps1`)
+    }
     return null
   }
   const web = ctx.get('webServer')
@@ -3536,8 +3541,27 @@ export function apply(ctx, config) {
   registerMobileRoute(ctx, () => settingsOf(config))
   registerMobileAssets(ctx, () => settingsOf(config))
   {
-    const proxy = startHttpsProxy(ctx, () => settingsOf(config))
-    if (proxy !== null) ctx.effect(() => () => { try { proxy.close() } catch {} }, 'dsh-reminder-notify: mobile https proxy')
+    let proxy = null
+    const ensureHttps = () => {
+      const enabled = settingsOf(config).httpsEnabled === true
+      if (enabled) {
+        if (proxy === null) proxy = startHttpsProxy(ctx, () => settingsOf(config))
+        return
+      }
+      if (proxy !== null) {
+        try { proxy.close() } catch {}
+        proxy = null
+      }
+    }
+    ctx.effect(() => {
+      ensureHttps()
+      const timer = setInterval(ensureHttps, 5000)
+      if (typeof timer.unref === 'function') timer.unref()
+      return () => {
+        clearInterval(timer)
+        if (proxy !== null) { try { proxy.close() } catch {} proxy = null }
+      }
+    }, 'dsh-reminder-notify: mobile https proxy')
   }
   const promptService = typeof ctx.get === 'function' ? ctx.get('systemPrompt') : undefined
   if (promptService !== undefined && typeof promptService.context === 'function') {
