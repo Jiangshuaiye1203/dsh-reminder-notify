@@ -3,7 +3,7 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { mobileProxyPathOk, httpsLinkOf, mobileBarsOf, mobileCsvOf, mobileSettingsPatch, mobileViewOf, attachmentSummaryOf, mobileAttachmentsOf, uploadNameFor, condStateAfter, choicePromptText, choicesArgOf, normalizeChoices, resetChoiceSeen, unreadChoices, customButtonsOf, customButtonsSpec, escapeHtml, mobileLinkOf, mobilePageOf, phonePromptText, repliesOf, resetPhoneSeen, unreadPhoneReplies, digestDue, digestShownToday, digestMessage, doctorReport, evaluateConditions, historyStats, inQuietHours, nextRunAfter, parseClock, parseCustomButtons, parseEvery, pushPayload, quietEndAt, todayKey, toastArgsOf, feedbackEntryOf, issueUrlOf, envSummaryOf, statsOf, feedbackPathOf, backupNow, listBackups, readBackup, backupDirOf, parseDays, daysLabelOf, nextRunWithDays, resolvedHostMode, nativeNotifyArgs, mobileAccessAllowed, manifestOf } from '../index.js'
+import { mobileProxyPathOk, httpsLinkOf, mobileBarsOf, mobileCsvOf, mobileSettingsPatch, mobileViewOf, attachmentSummaryOf, mobileAttachmentsOf, uploadNameFor, condStateAfter, choicePromptText, choicesArgOf, normalizeChoices, resetChoiceSeen, unreadChoices, customButtonsOf, customButtonsSpec, escapeHtml, mobileLinkOf, mobilePageOf, phonePromptText, repliesOf, resetPhoneSeen, unreadPhoneReplies, digestDue, digestShownToday, digestMessage, doctorReport, evaluateConditions, historyStats, inQuietHours, nextRunAfter, parseClock, parseCustomButtons, parseEvery, pushPayload, quietEndAt, todayKey, toastArgsOf, feedbackEntryOf, issueUrlOf, envSummaryOf, statsOf, feedbackPathOf, backupNow, listBackups, readBackup, backupDirOf, parseDays, daysLabelOf, nextRunWithDays, resolvedHostMode, nativeNotifyArgs, mobileAccessAllowed, manifestOf, sanitizeLabel } from '../index.js'
 
 let failed = 0
 function check(label, actual, expected) {
@@ -458,6 +458,16 @@ check('没设口令时局域网放行', mobileAccessAllowed({ mobileToken: '' },
 check('清单不带口令时 start_url 干净', manifestOf(secSettings, false).start_url.includes('?t='), false)
 check('清单带口令时 start_url 有口令', manifestOf(secSettings, true).start_url.includes('?t=abc123'), true)
 check('清单图标仍是两张', manifestOf(secSettings, true).icons.length, 2)
+
+
+check('附件名把换行折成空格', sanitizeLabel('a\nb\tc'), 'a b c')
+check('附件名去掉路径分隔符', /[\\/]/.test(sanitizeLabel('../../etc/passwd')), false)
+check('附件名不留开头点', sanitizeLabel('...hidden.txt').startsWith('.'), false)
+check('附件名去掉尖括号与引号', /[<>"|:*?]/.test(sanitizeLabel('a<b>"c"|d:e*f?g')), false)
+check('附件名去掉方向控制符', sanitizeLabel('abc\u202edef'), 'abc def')
+check('附件名超长按字符截断', Array.from(sanitizeLabel('字'.repeat(200))).length <= 60, true)
+check('附件名不切坏代理对', /[\uD800-\uDBFF]$/.test(sanitizeLabel('😀'.repeat(80))), false)
+check('附件名全是坏字符时为空', sanitizeLabel('\u0000\u200b'), '')
 
 if (failed > 0) { console.log('\n' + failed + ' 项失败'); process.exit(1) }
 console.log('\n全部通过')

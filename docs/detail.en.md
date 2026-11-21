@@ -11,3 +11,5 @@ Adds a `notify_user` tool to DeepSeek Harness: a "done" card when a task finishe
 - 0.35: cross-platform — macOS uses osascript and Linux uses notify-send for native notifications (no card buttons, reply box or snooze); doctor gained a native-notifier check.
 
 - 0.35.1: the mobile entry and unread replies are only readable from the host machine or with the token; the manifest no longer leaks the token. Also fixed `hostMode=native` never running on macOS/Linux and recurring jobs ignoring the weekday filter after the first run.
+
+- 0.35.2: attachment display names from the mobile page are sanitized (control and bidi characters, path separators and angle brackets dropped, newlines folded to spaces, truncated by code point so emoji stay intact).

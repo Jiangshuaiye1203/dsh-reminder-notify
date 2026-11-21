@@ -1395,6 +1395,21 @@ function pad2(value) {
   return String(value).padStart(2, '0')
 }
 
+/**
+ * 0.35.2：附件显示名只当成「一行短标签」——去掉控制字符与方向控制符、去掉路径与尖括号一类的字符、
+ * 把换行/制表折成空格、砍掉开头的点（避免 `..`/隐藏文件那种观感），最后按字符数截断（不切坏代理对）。
+ */
+export function sanitizeLabel(text, max = 60) {
+  let out = String(text ?? '')
+  out = out.replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]/g, ' ')
+  out = out.replace(/[\\/<>|:"*?]/g, ' ')
+  out = out.replace(/\s+/g, ' ').trim()
+  out = out.replace(/^\.+/, '').trim()
+  const chars = Array.from(out)
+  if (chars.length > max) out = chars.slice(0, max).join('').trim()
+  return out
+}
+
 export function uploadNameFor(type, now = new Date()) {
   const ext = MOBILE_ATTACH_KINDS[String(type ?? '').toLowerCase()]
   if (ext === undefined) return null
@@ -1505,7 +1520,7 @@ export function mobileAttachmentsOf(raw, dir = mobileUploadDir()) {
       continue
     }
     out.push({
-      name: str(item?.name, path.basename(resolved)).slice(0, 120),
+      name: sanitizeLabel(item?.name, 80) || path.basename(resolved),
       file: resolved,
       type: str(item?.type, ''),
       size: Math.max(0, Math.round(size)),
@@ -3269,7 +3284,7 @@ function registerMobileRoute(ctx, getSettings) {
         fs.mkdirSync(dir, { recursive: true })
         const target = path.join(dir, name)
         fs.writeFileSync(target, body)
-        const label = str(url.searchParams.get('name'), name).slice(-60)
+        const label = sanitizeLabel(url.searchParams.get('name')) || name
         return reply(res, 200, JSON.stringify({ ok: true, file: target, name: label, type, size: body.length }))
       } catch (error) {
         return reply(res, 500, JSON.stringify({ ok: false, error: 'write-failed', detail: String(error && error.message) }))
