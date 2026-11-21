@@ -1826,6 +1826,26 @@ export function probeGithub(timeoutMs = 8000) {
   })
 }
 
+/**
+ * 0.17.4：hosts 指向 127.0.0.1 不等于连不上——Steam++（Watt Toolkit）加速时，
+ * 它的本地代理就接在 127.0.0.1 上。所以真连一次再定结论：能通就是绿，连不上才红。
+ */
+async function withGithubProbe(report) {
+  const checks = Array.isArray(report?.checks) ? report.checks : []
+  const item = checks.find((check) => check?.id === 'github')
+  if (item === undefined || item === null || item.ok === true) return report
+  if (!String(item.detail ?? '').includes('127.0.0.1')) return report
+  const probe = await probeGithub(4000)
+  if (probe.ok) {
+    item.ok = true
+    item.detail = `hosts 指向 127.0.0.1，加速器已接管（HTTP ${probe.statusCode ?? 0} · ${probe.ms}ms）`
+    report.ok = checks.every((check) => check.ok !== false)
+  } else {
+    item.detail = `${item.detail}；现测失败：${probe.error ?? 'HTTP ' + String(probe.statusCode ?? 0)}`
+  }
+  return report
+}
+
 function registerDoctorRoute(ctx, getSettings) {
   const web = typeof ctx.get === 'function' ? ctx.get('webServer') : undefined
   if (web === undefined || web === null || typeof web.register !== 'function') {
@@ -1843,11 +1863,11 @@ function registerDoctorRoute(ctx, getSettings) {
       try {
         const settings = getSettings()
         const method = (req.method ?? 'GET').toUpperCase()
-        if (method === 'GET') return reply(res, 200, { ok: true, report: doctorReport(ctx, getSettings) })
+        if (method === 'GET') return reply(res, 200, { ok: true, report: await withGithubProbe(doctorReport(ctx, getSettings)) })
         if (method !== 'POST') return reply(res, 405, { ok: false, error: 'use GET or POST' })
         const body = await readJsonBody(req)
         const mode = body !== null && typeof body === 'object' ? str(body.mode, 'check') : 'check'
-        if (mode === 'check') return reply(res, 200, { ok: true, report: doctorReport(ctx, getSettings) })
+        if (mode === 'check') return reply(res, 200, { ok: true, report: await withGithubProbe(doctorReport(ctx, getSettings)) })
         if (mode === 'github') {
           const probe = await probeGithub()
           return reply(res, 200, { ok: true, mode: 'github', github: probe })
