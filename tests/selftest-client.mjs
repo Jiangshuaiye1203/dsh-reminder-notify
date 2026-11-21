@@ -227,6 +227,10 @@ try {
     let tree = await mount({ view: 'page', t })
     assert.equal(api.calls.filter((call) => call.method === 'GET').length >= 1, true, '面板应该先 GET 配置')
 
+    const pageText = collectText(tree)
+    assert.match(pageText, /备份与恢复/, '0.33 备份块标题没渲染')
+    assert.match(pageText, /备份一次/, '0.33 备份按钮没渲染')
+    assert.match(pageText, /导入配置/, '0.33 导入按钮没渲染')
     const secondsInput = findAll(tree, (node) => node.type === 'input' && node.props.type === 'number')[0]
     assert.ok(secondsInput, '没有找到数字输入框')
     secondsInput.props.onChange({ target: { value: '90' } })
