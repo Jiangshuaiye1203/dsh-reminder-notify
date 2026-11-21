@@ -3,7 +3,7 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { attachmentSummaryOf, mobileAttachmentsOf, uploadNameFor, condStateAfter, customButtonsOf, customButtonsSpec, escapeHtml, mobileLinkOf, mobilePageOf, phonePromptText, repliesOf, resetPhoneSeen, unreadPhoneReplies, digestDue, digestMessage, doctorReport, evaluateConditions, historyStats, inQuietHours, nextRunAfter, parseClock, parseCustomButtons, parseEvery, pushPayload, quietEndAt, todayKey, toastArgsOf } from '../index.js'
+import { mobileBarsOf, mobileCsvOf, mobileSettingsPatch, mobileViewOf, attachmentSummaryOf, mobileAttachmentsOf, uploadNameFor, condStateAfter, customButtonsOf, customButtonsSpec, escapeHtml, mobileLinkOf, mobilePageOf, phonePromptText, repliesOf, resetPhoneSeen, unreadPhoneReplies, digestDue, digestMessage, doctorReport, evaluateConditions, historyStats, inQuietHours, nextRunAfter, parseClock, parseCustomButtons, parseEvery, pushPayload, quietEndAt, todayKey, toastArgsOf } from '../index.js'
 
 let failed = 0
 function check(label, actual, expected) {
@@ -267,6 +267,41 @@ try {
 try {
   fs.unlinkSync(phoneHistory)
 } catch {}
+// 0.24：手机页升级成小 App
+check('mobileViewOf 解析三个视图', mobileViewOf({ tab: 'history', kind: 'done', page: '3' }), { tab: 'history', kind: 'done', page: 3 })
+check('mobileViewOf 兜非法值', mobileViewOf({ tab: 'bogus', kind: 'x', page: '0' }), { tab: 'home', kind: 'all', page: 1 })
+check('mobileViewOf 设置页', mobileViewOf({ tab: 'settings' }).tab, 'settings')
+check('mobileSettingsPatch 只收白名单', mobileSettingsPatch({ values: { sound: false, quietEnabled: true, pushUrl: 'x', seconds: 9 } }), { sound: false, quietEnabled: true })
+check('mobileSettingsPatch 空对象', mobileSettingsPatch({ values: {} }), {})
+const appNow = new Date(2026, 10, 21, 10, 0, 0)
+const appEntries = [
+  { at: appNow.getTime() - 3600000, kind: 'done', title: '收工', message: '一条正文', action: 'ok', reply: '', attachments: [] },
+  { at: appNow.getTime() - 7200000, kind: 'decide', title: '选一个', message: '两条正文', action: 'replied', reply: '选 A', attachments: [{ name: 'a.png' }] },
+  { at: appNow.getTime() - 40 * 86400000, kind: 'raw', title: '很久以前', message: '', action: 'timeout' },
+]
+const csv = mobileCsvOf(appEntries, 30, appNow)
+check('mobileCsvOf 表头', csv.split('\n')[0], '时间,档位,标题,正文,处理方式,回话,附件')
+check('mobileCsvOf 只导出窗口内', csv.trim().split('\n').length, 3)
+check('mobileCsvOf 带附件名', csv.includes('a.png'), true)
+check('mobileCsvOf 转义引号', mobileCsvOf([{ at: appNow.getTime(), kind: 'raw', title: '他说"好"', message: '', action: 'ok' }], 30, appNow).includes('""好""'), true)
+const bars = mobileBarsOf({ last30: [{ date: '2026-11-19', count: 1 }, { date: '2026-11-20', count: 4 }, { date: '2026-11-21', count: 2 }] }, 7)
+check('mobileBarsOf 条数', bars.length, 3)
+check('mobileBarsOf 最高柱 100%', bars[1].pct, 100)
+check('mobileBarsOf 相对高度', bars[2].pct, 50)
+const homePage = mobilePageOf({ mobileToken: 'k' }, appEntries, appNow, { tab: 'home' })
+check('概览有导航', homePage.includes('>概览<') && homePage.includes('>历史<') && homePage.includes('>设置<'), true)
+check('概览有 7 天图', homePage.includes('最近 7 天'), true)
+const historyPage = mobilePageOf({ mobileToken: 'k' }, appEntries, appNow, { tab: 'history', kind: 'done' })
+check('历史有筛选', historyPage.includes('>全部<') && historyPage.includes('>要你决定<'), true)
+check('历史只有完成那条', historyPage.includes('收工') && !historyPage.includes('选一个'), true)
+check('历史有翻页', historyPage.includes('上一页') && historyPage.includes('下一页'), true)
+const pageTwo = mobilePageOf({ mobileToken: 'k' }, appEntries, appNow, { tab: 'history', page: 2 })
+check('翻页页码提示', pageTwo.includes('共 3 条'), true)
+const settingsPage = mobilePageOf({ mobileToken: 'k', sound: true }, appEntries, appNow, { tab: 'settings' })
+check('设置有开关', settingsPage.includes('data-key="sound"') && settingsPage.includes('data-key="quietEnabled"'), true)
+check('设置有导出', settingsPage.includes('导出 CSV') && settingsPage.includes('/mobile/export'), true)
+check('设置显示当前状态', settingsPage.includes('日报时间'), true)
+
 
 if (failed > 0) {
   console.log(`\n${failed} 项失败`)

@@ -2312,9 +2312,70 @@ export function mobileLinkOf(settings, host, lan = null) {
   return { url: token === '' ? base : `${base}?t=${encodeURIComponent(token)}`, address, port, token }
 }
 
-export function mobilePageOf(settings, entries, now = new Date()) {
+
+// 0.24：手机页升级成小 App —— 概览 / 历史（筛选、翻页）/ 设置（开关与导出）。
+export function mobileViewOf(query = {}) {
+  const rawTab = str(query.tab, 'home')
+  const tab = rawTab === 'history' || rawTab === 'settings' ? rawTab : 'home'
+  const rawKind = str(query.kind, 'all')
+  const kind = rawKind === 'done' || rawKind === 'decide' || rawKind === 'raw' ? rawKind : 'all'
+  return { tab, kind, page: Math.max(1, Math.min(200, Math.round(num(query.page, 1)))) }
+}
+
+export function mobileSettingsPatch(body) {
+  const allowed = ['sound', 'quietEnabled', 'pushEnabled', 'digestEnabled', 'toastEnabled']
+  const values = body && typeof body === 'object' ? (body.values && typeof body.values === 'object' ? body.values : body) : {}
+  const patch = {}
+  for (const key of allowed) {
+    if (typeof values[key] === 'boolean') patch[key] = values[key]
+  }
+  return patch
+}
+
+export function mobileCsvOf(entries, days = 30, now = new Date()) {
+  const from = now.getTime() - Math.max(1, Math.round(days)) * 86400000
+  const list = entries.filter((entry) => Number(entry.at ?? 0) >= from)
+  const lines = ['时间,档位,标题,正文,处理方式,回话,附件']
+  for (const entry of list) {
+    const at = new Date(Number(entry.at ?? 0))
+    const stamp = `${at.getFullYear()}-${pad2(at.getMonth() + 1)}-${pad2(at.getDate())} ${pad2(at.getHours())}:${pad2(at.getMinutes())}`
+    const cells = [
+      stamp,
+      str(entry.kind, ''),
+      str(entry.title, ''),
+      str(entry.message, ''),
+      str(entry.action, ''),
+      str(entry.reply, ''),
+      (Array.isArray(entry.attachments) ? entry.attachments : []).map((item) => str(item?.name, '')).join(' '),
+    ]
+    lines.push(cells.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(','))
+  }
+  return lines.join('\n') + '\n'
+}
+
+export function mobileBarsOf(stats, days = 7) {
+  const buckets = Array.isArray(stats?.last30) ? stats.last30.slice(-days) : []
+  const max = buckets.reduce((best, item) => Math.max(best, Number(item?.count ?? 0)), 0)
+  return buckets.map((item) => ({
+    date: str(item?.date, ''),
+    count: Number(item?.count ?? 0),
+    pct: max <= 0 ? 0 : Math.round((Number(item?.count ?? 0) / max) * 100),
+  }))
+}
+
+export function mobilePageOf(settings, entries, now = new Date(), view = {}) {
   const stats = historyStats(entries)
-  const recent = entries.slice(-12).reverse()
+  const tab = str(view.tab, 'home') === 'history' ? 'history' : str(view.tab, 'home') === 'settings' ? 'settings' : 'home'
+  const kind = ['done', 'decide', 'raw'].includes(str(view.kind, '')) ? str(view.kind) : 'all'
+  const pageSize = 20
+  const filtered = kind === 'all' ? entries : entries.filter((entry) => entry.kind === kind)
+  const pageCount = Math.max(1, Math.ceil(filtered.length / pageSize))
+  const currentPage = Math.min(Math.max(1, Math.round(num(view.page, 1))), pageCount)
+  const pageList = filtered.slice(-currentPage * pageSize, filtered.length - (currentPage - 1) * pageSize).reverse()
+  const recent = tab === 'home' ? entries.slice(-5).reverse() : pageList
+  const token = str(settings.mobileToken, '')
+  const link = (extra = '') => `${MOBILE_ROUTE}?t=${encodeURIComponent(token)}${extra}`
+  const bars = mobileBarsOf(stats, 7)
   const kindText = { done: '完成', decide: '要你决定', raw: '普通' }
   const actionText = {
     ok: '知道了',
@@ -2371,16 +2432,74 @@ button { padding: 11px 16px; border-radius: 10px; border: 0; background: #2f81f7
 .pick button { flex: 1; border: 1px solid #2f3a4a; background: #1b212b; color: #c9d4e3; border-radius: 8px; padding: 8px 0; font-size: 13px; }
 .install { margin: 0 0 14px; width: 100%; padding: 11px 16px; border-radius: 10px; border: 1px solid #2b3442; background: #1b212b; color: #e6edf3; font-size: 15px; }
 #tip { color: #8b98a8; font-size: 12px; margin-top: 8px; min-height: 16px; }
+.tabs { display: flex; gap: 8px; margin: 0 0 14px; }
+.tab { flex: 1; text-align: center; padding: 9px 0; border-radius: 9px; background: #1b212b; color: #c9d4e3; text-decoration: none; font-size: 14px; }
+.tab.on { background: #2f81f7; color: #fff; }
+.panel { background: #1b212b; border-radius: 10px; padding: 10px 12px; margin-bottom: 14px; }
+.plabel { color: #8b98a8; font-size: 12px; margin-bottom: 8px; }
+.bars { display: flex; align-items: flex-end; gap: 6px; height: 64px; }
+.bar { flex: 1; min-height: 3px; border-radius: 3px 3px 0 0; background: #2f81f7; opacity: .85; }
+.filters { display: flex; gap: 8px; margin-bottom: 12px; }
+.fchip { flex: 1; text-align: center; padding: 7px 0; border-radius: 999px; background: #1b212b; color: #c9d4e3; text-decoration: none; font-size: 13px; }
+.fchip.on { background: #2f81f7; color: #fff; }
+.pager { display: flex; gap: 8px; margin: 0 0 14px; }
+.pg { flex: 1; text-align: center; padding: 9px 0; border-radius: 9px; background: #1b212b; color: #c9d4e3; text-decoration: none; font-size: 14px; }
+.pg.off { opacity: .4; }
+.row { display: flex; align-items: center; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #202834; font-size: 14px; }
+.row input { flex: 0 0 auto; width: 22px; height: 22px; padding: 0; }
+.kv { display: flex; justify-content: space-between; padding: 5px 0; color: #8b98a8; font-size: 13px; }
+.kv b { color: #e6edf3; font-weight: 500; }
+#setTip { color: #8b98a8; font-size: 12px; margin-top: 6px; min-height: 14px; }
 </style></head><body>
 <h1>桌面提醒 · 手机版</h1>
 <div class="sub">${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')} · 和电脑同一个 Wi-Fi 才能打开</div>
 <button id="install" class="install" hidden>安装到桌面</button>
-<div class="stats">
+<nav class="tabs">
+  <a class="tab${tab === 'home' ? ' on' : ''}" href="${link('&tab=home')}">概览</a>
+  <a class="tab${tab === 'history' ? ' on' : ''}" href="${link('&tab=history')}">历史</a>
+  <a class="tab${tab === 'settings' ? ' on' : ''}" href="${link('&tab=settings')}">设置</a>
+</nav>
+${tab === 'home'
+  ? `<div class="stats">
   <div class="stat"><b>${stats.today}</b><span>今天</span></div>
   <div class="stat"><b>${stats.total}</b><span>总共</span></div>
   <div class="stat"><b>${stats.byKind.decide ?? 0}</b><span>要你决定</span></div>
 </div>
-<ul>${rows === '' ? '<li><div class="msg">还没有提醒</div></li>' : rows}</ul>
+<div class="panel"><div class="plabel">最近 7 天</div><div class="bars">${bars.map((bar) => `<span class="bar" style="height:${bar.pct}%" title="${bar.date} · ${bar.count} 条"></span>`).join('')}</div></div>
+<ul>${rows === '' ? '<li><div class="msg">还没有提醒</div></li>' : rows}</ul>`
+  : tab === 'history'
+  ? `<div class="filters">${[['all', '全部'], ['done', '完成'], ['decide', '要你决定'], ['raw', '普通']].map(([value, label]) => `<a class="fchip${kind === value ? ' on' : ''}" href="${link('&tab=history&kind=' + value)}">${label}</a>`).join('')}</div>
+<div class="plabel">共 ${filtered.length} 条 · 第 ${currentPage}/${pageCount} 页</div>
+<ul>${rows === '' ? '<li><div class="msg">这一页没有记录</div></li>' : rows}</ul>
+<div class="pager">
+  ${currentPage > 1 ? `<a class="pg" href="${link('&tab=history&kind=' + kind + '&page=' + (currentPage - 1))}">上一页</a>` : '<span class="pg off">上一页</span>'}
+  ${currentPage < pageCount ? `<a class="pg" href="${link('&tab=history&kind=' + kind + '&page=' + (currentPage + 1))}">下一页</a>` : '<span class="pg off">下一页</span>'}
+</div>`
+  : `<div class="panel">
+  <div class="plabel">开关（改完点保存，立即生效）</div>
+  <label class="row"><span>提示音</span><input type="checkbox" data-key="sound" ${settings.sound === false ? '' : 'checked'}></label>
+  <label class="row"><span>免打扰</span><input type="checkbox" data-key="quietEnabled" ${settings.quietEnabled === true ? 'checked' : ''}></label>
+  <label class="row"><span>推送到手机</span><input type="checkbox" data-key="pushEnabled" ${settings.pushEnabled === true ? 'checked' : ''}></label>
+  <label class="row"><span>每日日报</span><input type="checkbox" data-key="digestEnabled" ${settings.digestEnabled === true ? 'checked' : ''}></label>
+  <label class="row"><span>系统通知气泡</span><input type="checkbox" data-key="toastEnabled" ${settings.toastEnabled === true ? 'checked' : ''}></label>
+  <button type="button" id="saveSet">保存</button>
+  <div id="setTip"></div>
+</div>
+<div class="panel">
+  <div class="plabel">导出</div>
+  <div class="pick">
+    <button type="button" id="expCsv">导出 CSV</button>
+    <button type="button" id="expJson">导出 JSON</button>
+  </div>
+</div>
+<div class="panel">
+  <div class="plabel">当前状态</div>
+  <div class="kv"><span>停留秒数</span><b>${num(settings.seconds, 60)}</b></div>
+  <div class="kv"><span>位置</span><b>${escapeHtml(str(settings.position, 'br'))}</b></div>
+  <div class="kv"><span>日报时间</span><b>${escapeHtml(str(settings.digestTime, '09:00'))}</b></div>
+  <div class="kv"><span>提示音</span><b>${settings.sound === false ? '关' : '开'}</b></div>
+</div>`}
+
 <div class="foot">
 <div id="att" class="att"></div>
 <div class="pick">
@@ -2483,6 +2602,28 @@ document.getElementById('pickRec').addEventListener('click', async () => {
     toast('正在录音，说完点「停止录音」');
   } catch (err) { toast('打不开麦克风：' + err.message); }
 });
+const saveSet = document.getElementById('saveSet');
+if (saveSet) {
+  saveSet.addEventListener('click', async () => {
+    const values = {};
+    document.querySelectorAll('input[data-key]').forEach((box) => { values[box.dataset.key] = box.checked; });
+    const box = document.getElementById('setTip');
+    box.textContent = '保存中…';
+    try {
+      const r = await fetch('${MOBILE_ROUTE}/settings' + location.search, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ values }) });
+      const data = await r.json();
+      box.textContent = data && data.ok ? '已保存，立即生效' : '没保存成：' + ((data && data.error) || '未知原因');
+    } catch (err) { box.textContent = '没保存成：' + err.message; }
+  });
+}
+const exportTo = (format) => {
+  const url = '${MOBILE_ROUTE}/export' + location.search + '&format=' + format + '&days=30';
+  location.href = url;
+};
+const csvBtn = document.getElementById('expCsv');
+const jsonBtn = document.getElementById('expJson');
+if (csvBtn) csvBtn.addEventListener('click', () => exportTo('csv'));
+if (jsonBtn) jsonBtn.addEventListener('click', () => exportTo('json'));
 const f = document.getElementById('f'); const m = document.getElementById('m'); const tip = document.getElementById('tip');
 f.addEventListener('submit', async (e) => {
   e.preventDefault(); const text = m.value.trim(); if (!text && attachments.length === 0) return;
@@ -2632,7 +2773,7 @@ function registerMobileRoute(ctx, getSettings) {
       const url = new URL(req.url ?? MOBILE_ROUTE, 'http://127.0.0.1')
       if (!authorized(settings, url.searchParams.get('t'))) return unauthorized(res)
       if (req.method !== 'GET') return reply(res, 405, JSON.stringify({ ok: false, error: 'use GET' }))
-      const html = mobilePageOf(settings, readHistory(settings))
+      const html = mobilePageOf(settings, readHistory(settings), new Date(), mobileViewOf(Object.fromEntries(url.searchParams)))
       return reply(res, 200, html, 'text/html; charset=utf-8')
     },
   }
@@ -2704,6 +2845,49 @@ function registerMobileRoute(ctx, getSettings) {
     },
   }
   mountRoute(ctx, uploadRoute, 'dsh-reminder-notify: mobile upload route')
+
+  const settingsRoute = {
+    kind: 'exact',
+    path: `${MOBILE_ROUTE}/settings`,
+    handler: async (req, res) => {
+      const settings = getSettings()
+      const url = new URL(req.url ?? `${MOBILE_ROUTE}/settings`, 'http://127.0.0.1')
+      if (!authorized(settings, url.searchParams.get('t'))) return unauthorized(res)
+      if (req.method !== 'POST') return reply(res, 405, JSON.stringify({ ok: false, error: 'use POST' }))
+      const body = await readJsonBody(req)
+      const patch = mobileSettingsPatch(body)
+      if (Object.keys(patch).length === 0) return reply(res, 400, JSON.stringify({ ok: false, error: 'nothing-to-save' }))
+      await saveBalanceState(ctx, patch)
+      return reply(res, 200, JSON.stringify({ ok: true, saved: patch }))
+    },
+  }
+  mountRoute(ctx, settingsRoute, 'dsh-reminder-notify: mobile settings route')
+
+  const exportRoute = {
+    kind: 'exact',
+    path: `${MOBILE_ROUTE}/export`,
+    handler: async (req, res) => {
+      const settings = getSettings()
+      const url = new URL(req.url ?? `${MOBILE_ROUTE}/export`, 'http://127.0.0.1')
+      if (!authorized(settings, url.searchParams.get('t'))) return unauthorized(res)
+      const format = str(url.searchParams.get('format'), 'csv').toLowerCase() === 'json' ? 'json' : 'csv'
+      const days = Math.max(1, Math.min(365, Math.round(num(url.searchParams.get('days'), 30))))
+      const entries = readHistory(settings)
+      const from = Date.now() - days * 86400000
+      const list = entries.filter((entry) => Number(entry.at ?? 0) >= from)
+      const stamp = new Date()
+      const name = `提醒历史-${stamp.getFullYear()}${pad2(stamp.getMonth() + 1)}${pad2(stamp.getDate())}-${pad2(stamp.getHours())}${pad2(stamp.getMinutes())}.${format}`
+      const body = format === 'json' ? JSON.stringify(list, null, 2) : mobileCsvOf(entries, days)
+      const type = format === 'json' ? 'application/json; charset=utf-8' : 'text/csv; charset=utf-8'
+      res.writeHead(200, {
+        'content-type': type,
+        'cache-control': 'no-store',
+        'content-disposition': `attachment; filename*=UTF-8''${encodeURIComponent(name)}`,
+      })
+      res.end(body)
+    },
+  }
+  mountRoute(ctx, exportRoute, 'dsh-reminder-notify: mobile export route')
 
   const linkRoute = {
     kind: 'exact',

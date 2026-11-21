@@ -22,3 +22,4 @@ Cards are drawn by the bundled `host/ReminderHost.ps1` with the built-in PowerSh
 
 - 0.22.1 fix: on a plain-http LAN address the phone page no longer pretends to be installable as a PWA — over http it explains the manual add-to-home-screen route (Safari share sheete / Chrome menu), and the service worker plus offline cache only engage on https or localhost.
 - 0.23 adds: phone replies can carry 1-3 images or voice clips (stored locally under `~/.dsh/dsh-reminder-notify/uploads/`); history shows `files N` and the prompt lists the file names.
+- 0.24 adds: the phone page becomes a small app - overview (stats + 7-day bars), history (kind filter, 20 per page), settings (five toggles + CSV/JSON export + read-only status).
