@@ -43,6 +43,7 @@ dsh plugin --profile desktop add link:<本目录绝对路径>
 - 新增路由：`GET /dsh-reminder-notify/mobile/export?format=csv|json&days=30`（带 `t` 口令，返回下载）、
   `POST /dsh-reminder-notify/mobile/settings`（body `{"values":{...}}`，只接受上面五个开关）。
 - 手机页的输入框 / 附件按钮仍然吸在底部，任何一页都能直接回话。
+- 0.24.1：底部那块（附件按钮 + 输入框）比较高，把页面底部留白从 40px 加到 190px，否则最后一屏内容会被挡住。
 
 ## 0.23 起多了什么
 

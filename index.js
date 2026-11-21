@@ -2407,7 +2407,7 @@ export function mobilePageOf(settings, entries, now = new Date(), view = {}) {
 <style>
 :root { color-scheme: dark; }
 * { box-sizing: border-box; }
-body { margin: 0; padding: 16px 14px 40px; background: #14181f; color: #e6edf3; font: 15px/1.55 -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; }
+body { margin: 0; padding: 16px 14px 190px; background: #14181f; color: #e6edf3; font: 15px/1.55 -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; }
 h1 { font-size: 17px; margin: 0 0 4px; }
 .sub { color: #8b98a8; font-size: 13px; margin-bottom: 16px; }
 .stats { display: flex; gap: 10px; margin-bottom: 16px; }
