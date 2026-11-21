@@ -231,6 +231,16 @@ try {
     assert.match(pageText, /备份与恢复/, '0.33 备份块标题没渲染')
     assert.match(pageText, /备份一次/, '0.33 备份按钮没渲染')
     assert.match(pageText, /导入配置/, '0.33 导入按钮没渲染')
+    const basicGroup = findAll(tree, (node) => node.props && node.props.className === 'drn-group')[0]
+    assert.ok(basicGroup, '没有找到基本组')
+    const basicText = collectText(basicGroup)
+    assert.match(basicText, /基本/, '第一个分组应该还是「基本」')
+    assert.match(basicText, /发一张完成卡/, '0.35.5 试试看三按钮应该在「基本」组第一行')
+    assert.match(basicText, /隐藏小字|显示小字/, '0.35.5 小字开关应该跟着进「基本」组')
+    const digestHead = findAll(tree, (node) => node.props && node.props.className === 'drn-fold-head' && /日报与推送/.test(collectText(node)))[0]
+    assert.ok(digestHead, '没找到「日报与推送」折叠标题')
+    const digestBody = findAll(tree, (node) => node.props && node.props.className === 'drn-fold-body')[0]
+    assert.equal(digestBody.props.style && digestBody.props.style.display, 'none', '0.35.5 日报与推送应该默认收起')
     const secondsInput = findAll(tree, (node) => node.type === 'input' && node.props.type === 'number')[0]
     assert.ok(secondsInput, '没有找到数字输入框')
     secondsInput.props.onChange({ target: { value: '90' } })
