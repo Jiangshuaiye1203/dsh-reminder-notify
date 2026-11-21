@@ -90,7 +90,7 @@ check('没余额就不加那行', digestMessage({}, digestEntries, null).split('
   const report = doctorReport({ get: () => undefined }, () => ({}))
   check('doctor 有足够检查项', report.checks.length >= 8, true)
   check('doctor 结构完整', ['ok', 'version', 'checks', 'host', 'paths'].every((key) => key in report), true)
-  check('doctor 平台检查为真', report.checks.find((item) => item.id === 'platform').ok, true)
+  check('doctor 平台检查在 Windows 上为真', report.checks.find((item) => item.id === 'platform').ok, process.platform === 'win32')
   check('doctor 每项都有 id/ok/detail', report.checks.every((item) => typeof item.id === 'string' && typeof item.ok === 'boolean' && typeof item.detail === 'string'), true)
   check('doctor 没服务时也能给出结论', typeof report.ok, 'boolean')
 }
