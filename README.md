@@ -36,7 +36,7 @@ dsh plugin --profile desktop add link:<本目录绝对路径>
 
 - 手机页可以有 https 入口：跑一次 `scripts/make-cert.ps1`（生成自签证书 `~/.dsh/dsh-reminder-notify/mobile.pfx`），
   配置里把「https 入口」打开（默认端口 1319），手机打开 `https://<内网IP>:1319/dsh-reminder-notify/mobile?t=<口令>`。
-  在这个地址上浏览器才给麦克风（能录音），「安装到桌面」也才是真 PWA；首次会提示证书不受信任，选继续访问即可。
+  在这个地址上浏览器才给麦克风（能录音），「安装到桌面」也才是真 PWA；首次会提示证书不受信任，选继续访问即可。面板里改完这个开关 5 秒内生效，不用重启。
 - https 入口只放行手机页相关路径，其它接口一律 404。
 
 ## 0.24 起多了什么

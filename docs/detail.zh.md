@@ -23,4 +23,4 @@
 - 0.22.1 修正：手机页在内网 http 地址上不再假装能「安装到桌面」——http 给「添加到主屏幕」的手动说明（iPhone Safari 分享菜单 / Android Chrome 菜单），service worker 与离线缓存只在 https 或 localhost 下启用。
 - 0.23 新增：手机回话可以带 1–3 个图片或语音（存在本机 `~/.dsh/dsh-reminder-notify/uploads/`），历史里显示「附件 N」，提示词里会带文件名。
 - 0.24 新增：手机页升级成小 App——概览（统计 + 7 天柱状图）、历史（按档位筛选、每页 20 条翻页）、设置（五个开关 + 导出 CSV/JSON + 只读状态）。
-- 0.25 新增：可选 https 入口（`scripts/make-cert.ps1` 出自签证书、配置里 httpsEnabled/httpsPort），手机在 https 下才能录音、也能当真 PWA 安装；该入口只放行手机页。
+- 0.25 新增：可选 https 入口（`scripts/make-cert.ps1` 出自签证书、配置里 httpsEnabled/httpsPort），手机在 https 下才能录音、也能当真 PWA 安装；该入口只放行手机页；开关改完 5 秒内生效，不用重启。
