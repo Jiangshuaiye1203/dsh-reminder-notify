@@ -38,7 +38,7 @@ const z = await import('@deepseek-ai/schemastery')
 // 标了 volatile 还有个好处：改完立刻生效，不用重启插件 —— notify() 每次调用都会用
 // settingsOf(config) 现读，所以拿到的就是最新值。
 export const Config = z === null ? undefined : z.object({
-  hostMode: z.union(['script', 'exe']).default('script').description('宿主模式：script = 包内 PowerShell 脚本（默认），exe = 老的客户端 exe').volatile(),
+  hostMode: z.union(['script', 'exe', 'native']).default('script').description('宿主模式：script = 包内 PowerShell 脚本（默认），exe = 老的客户端 exe').volatile(),
   scriptPath: z.string().default('').description('脚本宿主路径，留空 = 包内 host/ReminderHost.ps1').volatile(),
   powershellPath: z.string().default('powershell.exe').description('调 PowerShell 用的可执行文件').volatile(),
   clientDir: z.string().default('').description('exe 模式下的客户端目录，留空 = 包内 assets/').volatile(),
@@ -255,7 +255,7 @@ function settingsOf(config) {
   const position = str(c.position, 'br')
   const hostMode = str(c.hostMode, 'script').toLowerCase()
   return {
-    hostMode: hostMode === 'exe' ? 'exe' : 'script',
+    hostMode: hostMode === 'exe' ? 'exe' : hostMode === 'native' ? 'native' : 'script',
     clientDir: str(c.clientDir, ''),
     scriptPath: str(c.scriptPath, BUNDLED_HOST_SCRIPT),
     powershellPath: str(c.powershellPath, 'powershell.exe'),
@@ -414,6 +414,37 @@ function appearanceOf(kind, settings) {
 // 避免一条带引号的正文把后面所有参数吃掉。
 function psSafe(value) {
   return String(value).replace(/"/g, "'").replace(/[\r\n]+/g, ' ')
+}
+
+/**
+ * 实际用哪种宿主：
+ * - Windows：settings.hostMode（script / exe）
+ * - 其它平台：脚本宿主和 exe 都不存在，统一走系统原生通知（native）
+ */
+export function resolvedHostMode(settings, platform = process.platform) {
+  const raw = str(settings?.hostMode, 'script').toLowerCase()
+  if (platform === 'win32') return raw === 'exe' ? 'exe' : 'script'
+  return 'native'
+}
+
+function appleScriptString(text) {
+  return '"' + String(text).replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"'
+}
+
+/** 非 Windows 的原生通知命令；没有可用命令时返回 null。 */
+export function nativeNotifyArgs(platform, title, message, seconds, sound = false) {
+  const secs = Math.round(clamp(num(seconds, 60), 2, 600))
+  if (platform === 'darwin') {
+    const script =
+      'display notification ' + appleScriptString(message) +
+      ' with title ' + appleScriptString(title) +
+      (sound ? ' sound name "Glass"' : '')
+    return { cmd: 'osascript', args: ['-e', script], seconds: secs }
+  }
+  if (platform === 'linux' || platform === 'freebsd' || platform === 'openbsd') {
+    return { cmd: 'notify-send', args: ['-a', 'DeepSeek Harness', '-t', String(secs * 1000), str(title, ''), str(message, '')], seconds: secs }
+  }
+  return null
 }
 
 function launch(file, argv, cwd) {
@@ -1019,6 +1050,52 @@ async function notify(kind, args, settings) {
       position: settings.position,
       sound: false,
       detail: '配置里关掉了「弹出窗口」，这张卡没有弹',
+    }
+  }
+
+  // 非 Windows（mac / Linux）：没有 PowerShell 宿主，直接调系统原生通知
+  if (resolvedHostMode(settings) === 'native') {
+    const spec = nativeNotifyArgs(process.platform, title, message, seconds, sound)
+    if (spec === null) {
+      return {
+        ok: false,
+        error: 'host-unsupported',
+        detail: `当前平台（${process.platform}）没有可用的系统通知命令；Windows 用脚本宿主，macOS 需要 osascript，Linux 需要 notify-send`,
+      }
+    }
+    let exitCode = null
+    try {
+      const { exited } = await launch(spec.cmd, spec.args, PACKAGE_ROOT)
+      const code = await Promise.race([exited, new Promise((r) => setTimeout(() => r('running'), 2500))])
+      exitCode = code === 'running' ? null : code
+    } catch (error) {
+      return { ok: false, error: 'native-failed', detail: String(error?.message ?? error), notifier: spec.cmd }
+    }
+    appendHistory(settings, {
+      at: Date.now(),
+      kind,
+      title,
+      message,
+      action: 'native',
+      count: 1,
+      snoozed: false,
+      quiet: false,
+    })
+    return {
+      ok: true,
+      hostMode: 'native',
+      kind,
+      title,
+      message,
+      seconds: spec.seconds,
+      position: settings.position,
+      sound: false,
+      audio: null,
+      notifier: spec.cmd,
+      exitCode,
+      queued: false,
+      position_in_queue: 0,
+      detail: `用系统通知（${spec.cmd}）发送，没有卡片按钮与回话框`,
     }
   }
 
@@ -2251,7 +2328,14 @@ export function doctorReport(ctx, getSettings) {
   const checks = []
   const add = (id, ok, detail) => checks.push({ id, ok: ok === true, detail: String(detail ?? '') })
 
-  add('platform', process.platform === 'win32', process.platform)
+  const platformOk = process.platform === 'win32' || process.platform === 'darwin' || process.platform === 'linux'
+  add('platform', platformOk, process.platform)
+
+  const nativeSpec = nativeNotifyArgs(process.platform, 't', 'm', 5)
+  if (process.platform !== 'win32') {
+    const nativePath = nativeSpec === null ? null : resolveOnPath(nativeSpec.cmd)
+    add('native-notifier', nativePath !== null && nativePath !== undefined, nativeSpec === null ? `当前平台（${process.platform}）没有可用的系统通知命令` : `${nativeSpec.cmd} → ${nativePath ?? '找不到'}`)
+  }
 
   const psName = str(settings.powershellPath, 'powershell.exe')
   const looksLikePath = psName.includes('/') || psName.includes('\\')

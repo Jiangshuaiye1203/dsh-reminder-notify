@@ -257,3 +257,12 @@ CI 在 `.github/workflows/ci.yml`：Ubuntu 与 Windows 各跑 node 20/22，做�
 
 - 修了一个真 bug：插件把自己写回的内部状态（日报日期、余额基线、条件状态）只写进了配置，却没让运行中的 `getSettings()` 看到 —— 于是「今天还没发日报」永远成立，日报每分钟弹一次（今天弹了 175 次）。
 - 现在写回后立刻生效；启动时若历史里今天已有日报，直接补上日期，不会一装完就连弹。
+
+## 0.35 起：macOS / Linux 也能用（走系统原生通知）
+
+- Windows 仍然用包内的 PowerShell 卡片宿主（脚本或老 exe）。
+- macOS：`notify_user` 改用 `osascript -e 'display notification …'`，出现在通知中心，可带提示音。
+- Linux：改用 `notify-send -a "DeepSeek Harness" -t <秒>`（需要 `libnotify-bin`）。
+- 原生通知没有卡片按钮、回话框、稍后提醒与排队合并（这些是卡片宿主的能力）；`hostMode: "native"` 可显式指定，非 Windows 平台会自动走它。
+- 自检（`/dsh-reminder-notify/doctor`）新增 `native-notifier` 一项，检查 `osascript` / `notify-send` 是否在 PATH 上。
+

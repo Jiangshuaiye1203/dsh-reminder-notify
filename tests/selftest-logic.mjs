@@ -3,7 +3,7 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { mobileProxyPathOk, httpsLinkOf, mobileBarsOf, mobileCsvOf, mobileSettingsPatch, mobileViewOf, attachmentSummaryOf, mobileAttachmentsOf, uploadNameFor, condStateAfter, choicePromptText, choicesArgOf, normalizeChoices, resetChoiceSeen, unreadChoices, customButtonsOf, customButtonsSpec, escapeHtml, mobileLinkOf, mobilePageOf, phonePromptText, repliesOf, resetPhoneSeen, unreadPhoneReplies, digestDue, digestShownToday, digestMessage, doctorReport, evaluateConditions, historyStats, inQuietHours, nextRunAfter, parseClock, parseCustomButtons, parseEvery, pushPayload, quietEndAt, todayKey, toastArgsOf, feedbackEntryOf, issueUrlOf, envSummaryOf, statsOf, feedbackPathOf, backupNow, listBackups, readBackup, backupDirOf, parseDays, daysLabelOf, nextRunWithDays } from '../index.js'
+import { mobileProxyPathOk, httpsLinkOf, mobileBarsOf, mobileCsvOf, mobileSettingsPatch, mobileViewOf, attachmentSummaryOf, mobileAttachmentsOf, uploadNameFor, condStateAfter, choicePromptText, choicesArgOf, normalizeChoices, resetChoiceSeen, unreadChoices, customButtonsOf, customButtonsSpec, escapeHtml, mobileLinkOf, mobilePageOf, phonePromptText, repliesOf, resetPhoneSeen, unreadPhoneReplies, digestDue, digestShownToday, digestMessage, doctorReport, evaluateConditions, historyStats, inQuietHours, nextRunAfter, parseClock, parseCustomButtons, parseEvery, pushPayload, quietEndAt, todayKey, toastArgsOf, feedbackEntryOf, issueUrlOf, envSummaryOf, statsOf, feedbackPathOf, backupNow, listBackups, readBackup, backupDirOf, parseDays, daysLabelOf, nextRunWithDays, resolvedHostMode, nativeNotifyArgs } from '../index.js'
 
 let failed = 0
 function check(label, actual, expected) {
@@ -418,6 +418,26 @@ const otherPrompt = choicePromptText({ historyFile: otherHistory }, 179520000999
 check('choicePromptText 带上「其他」内容', otherPrompt.includes('其他：我自己想的方案 C'), true)
 check('choicePromptText 不把纯回话当选择', otherPrompt.includes('普通回话'), false)
 fs.unlinkSync(otherHistory)
+
+
+// ---- 0.35：跨平台宿主（mac / Linux 走系统原生通知） ----
+check('resolvedHostMode Windows 用脚本', resolvedHostMode({ hostMode: 'script' }, 'win32'), 'script')
+check('resolvedHostMode Windows 用 exe', resolvedHostMode({ hostMode: 'exe' }, 'win32'), 'exe')
+check('resolvedHostMode macOS 走 native', resolvedHostMode({ hostMode: 'script' }, 'darwin'), 'native')
+check('resolvedHostMode Linux 走 native', resolvedHostMode({ hostMode: 'exe' }, 'linux'), 'native')
+const macSpec = nativeNotifyArgs('darwin', '标题', '正文', 30, false)
+check('macOS 用 osascript', macSpec.cmd, 'osascript')
+check('macOS 脚本里带标题与正文', macSpec.args[1].includes('display notification "正文" with title "标题"'), true)
+check('macOS 不默认带声音', macSpec.args[1].includes('sound name'), false)
+check('macOS 可带声音', nativeNotifyArgs('darwin', 't', 'm', 10, true).args[1].includes('sound name "Glass"'), true)
+const macQuote = nativeNotifyArgs('darwin', 'a"b', 'c\\d', 10)
+check('macOS 引号被转义', macQuote.args[1].includes('a\\"b'), true)
+const linuxSpec = nativeNotifyArgs('linux', '标题', '正文', 45)
+check('Linux 用 notify-send', linuxSpec.cmd, 'notify-send')
+check('Linux 秒数换算成毫秒', linuxSpec.args.includes('45000'), true)
+check('Linux 参数顺序', [linuxSpec.args[0], linuxSpec.args[2], linuxSpec.args[4], linuxSpec.args[5]], ['-a', '-t', '标题', '正文'])
+check('未知平台返回 null', nativeNotifyArgs('aix', 't', 'm', 5), null)
+check('秒数夹到 2–600', nativeNotifyArgs('linux', 't', 'm', 0).seconds, 2)
 
 
 if (failed > 0) {
