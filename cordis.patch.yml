@@ -136,3 +136,6 @@
         focusAssistMute: true
         # 卡片回话也按上面的推送地址发到手机
         pushReply: true
+        httpsEnabled: false
+        httpsPort: 1319
+        httpsPfx: ''

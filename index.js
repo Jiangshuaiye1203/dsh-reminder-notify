@@ -12,6 +12,7 @@
 import { spawn } from 'node:child_process'
 import fs from 'node:fs'
 import https from 'node:https'
+import http from 'node:http'
 import net from 'node:net'
 import os from 'node:os'
 import path from 'node:path'
@@ -120,6 +121,9 @@ export const Config = z === null ? undefined : z.object({
   trayEnabled: z.boolean().default(false).description('启动托盘图标与全局热键（插件启动时自动拉起）').volatile(),
   trayHotkey: z.string().default('Ctrl+Alt+R').description('托盘全局热键，形如 Ctrl+Alt+R').volatile(),
   trayStateFile: z.string().default('').description('托盘静音/免打扰状态文件（留空用 ~/.dsh/dsh-reminder-notify/tray-state.json）').volatile(),
+  httpsEnabled: z.boolean().default(false).description('手机页加一个 https 入口（自签证书）：手机才能录音、也能当真 PWA 装到桌面').volatile(),
+  httpsPort: z.number().default(1319).description('https 入口用的端口').volatile(),
+  httpsPfx: z.string().default('').description('自签证书 pfx 路径，留空用 ~/.dsh/dsh-reminder-notify/mobile.pfx').volatile(),
   retryHostOnce: z.boolean().default(true).description('宿主第一次没画出卡片时，自动静音重试一次').volatile(),
   replyEnabled: z.boolean().default(true).description('卡片上给一个输入框，可以把一句话回给模型').volatile(),
   customButtons: z.string().default('').description('卡片上的自定义按钮：标签|网址，多条用分号隔开，最多 3 个').volatile(),
@@ -323,6 +327,9 @@ function settingsOf(config) {
     trayEnabled: c.trayEnabled === true,
     trayHotkey: str(c.trayHotkey, 'Ctrl+Alt+R'),
     trayStateFile: str(c.trayStateFile, ''),
+    httpsEnabled: c.httpsEnabled === true,
+    httpsPort: clamp(num(c.httpsPort, 1319), 1024, 65535),
+    httpsPfx: str(c.httpsPfx, ''),
     retryHostOnce: c.retryHostOnce !== false,
     replyEnabled: c.replyEnabled !== false,
     customButtons: str(c.customButtons, ''),
@@ -1169,6 +1176,81 @@ export function uploadNameFor(type, now = new Date()) {
   if (ext === undefined) return null
   const stamp = `${now.getFullYear()}${pad2(now.getMonth() + 1)}${pad2(now.getDate())}-${pad2(now.getHours())}${pad2(now.getMinutes())}${pad2(now.getSeconds())}`
   return `${stamp}-${Math.random().toString(36).slice(2, 8)}.${ext}`
+}
+
+
+// 0.25：手机页的可选 https 入口。局域网是 http 时浏览器不给麦克风、也不给真 PWA，
+// 所以在本地起一个自签证书的 https 反向代理，只放行手机页相关路径。
+function warn(text) { try { console.warn(text) } catch {} }
+function info(text) { try { console.log(text) } catch {} }
+
+export function httpsPfxPathOf(settings) {
+  const custom = str(settings.httpsPfx, '')
+  if (custom !== '') return custom
+  return path.join(os.homedir(), '.dsh', 'dsh-reminder-notify', 'mobile.pfx')
+}
+
+export function mobileProxyPathOk(pathname) {
+  const target = str(pathname, '')
+  return target === MOBILE_ROUTE || target.startsWith(`${MOBILE_ROUTE}/`)
+}
+
+export function httpsLinkOf(settings, host, lan = null) {
+  const port = clamp(num(settings.httpsPort, 1319), 1024, 65535)
+  const address = lan && lan.address ? lan.address : lanAddressOf()?.address ?? '127.0.0.1'
+  const token = str(settings.mobileToken, '')
+  return `https://${address}:${port}${MOBILE_ROUTE}?t=${encodeURIComponent(token)}`
+}
+
+export function startHttpsProxy(ctx, getSettings) {
+  const settings = getSettings()
+  if (settings.httpsEnabled !== true) return null
+  const pfxPath = httpsPfxPathOf(settings)
+  if (!fs.existsSync(pfxPath)) {
+    warn(`mobile https: 证书不存在（${pfxPath}），先跑 scripts/make-cert.ps1`)
+    return null
+  }
+  const web = ctx.get('webServer')
+  const origin = typeof web?.getOrigin === 'function' ? String(web.getOrigin()) : ''
+  if (!/^http:\/\//.test(origin)) {
+    warn('mobile https: 拿不到 web 端口，先不启动')
+    return null
+  }
+  const target = new URL(origin)
+  let server = null
+  try {
+    server = https.createServer(
+      { pfx: fs.readFileSync(pfxPath), passphrase: 'dsh-reminder' },
+      (req, res) => {
+        const pathname = String(req.url ?? '/').split('?')[0]
+        if (!mobileProxyPathOk(pathname)) {
+          res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' })
+          res.end('only the mobile page is exposed here')
+          return
+        }
+        const upstream = http.request({ host: target.hostname, port: Number(target.port || 80), path: req.url ?? '/', method: req.method, headers: { ...req.headers, host: target.host } }, (up) => {
+          res.writeHead(up.statusCode ?? 502, up.headers)
+          up.pipe(res)
+        })
+        upstream.on('error', () => {
+          res.writeHead(502, { 'content-type': 'text/plain; charset=utf-8' })
+          res.end('upstream error')
+        })
+        req.pipe(upstream)
+      },
+    )
+    server.on('error', (error) => {
+      warn(`mobile https: 起不来（${error && error.message}）`)
+    })
+    server.listen(settings.httpsPort, () => {
+      info(`mobile https: https://0.0.0.0:${settings.httpsPort}${MOBILE_ROUTE}（自签证书）`)
+    })
+    if (server.unref) server.unref()
+    return server
+  } catch (error) {
+    warn(`mobile https: 初始化失败（${error && error.message}）`)
+    return null
+  }
 }
 
 export function attachmentSummaryOf(entry) {
@@ -2453,6 +2535,7 @@ button { padding: 11px 16px; border-radius: 10px; border: 0; background: #2f81f7
 </style></head><body>
 <h1>桌面提醒 · 手机版</h1>
 <div class="sub">${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')} · 和电脑同一个 Wi-Fi 才能打开</div>
+${settings.httpsEnabled === true ? `<div class="sub" style="margin-top:-8px">录音与「安装到桌面」需要 https：<a href="${escapeHtml(httpsLinkOf(settings, '', lanAddressOf()))}" style="color:#7db6ff">打开 https 版本</a>（浏览器会提示证书不受信任，选继续访问即可）</div>` : ''}
 <button id="install" class="install" hidden>安装到桌面</button>
 <nav class="tabs">
   <a class="tab${tab === 'home' ? ' on' : ''}" href="${link('&tab=home')}">概览</a>
@@ -3452,6 +3535,10 @@ export function apply(ctx, config) {
   registerRepliesRoute(ctx, () => settingsOf(config))
   registerMobileRoute(ctx, () => settingsOf(config))
   registerMobileAssets(ctx, () => settingsOf(config))
+  {
+    const proxy = startHttpsProxy(ctx, () => settingsOf(config))
+    if (proxy !== null) ctx.effect(() => () => { try { proxy.close() } catch {} }, 'dsh-reminder-notify: mobile https proxy')
+  }
   const promptService = typeof ctx.get === 'function' ? ctx.get('systemPrompt') : undefined
   if (promptService !== undefined && typeof promptService.context === 'function') {
     ctx.effect(

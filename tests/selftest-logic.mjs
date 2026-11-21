@@ -3,7 +3,7 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { mobileBarsOf, mobileCsvOf, mobileSettingsPatch, mobileViewOf, attachmentSummaryOf, mobileAttachmentsOf, uploadNameFor, condStateAfter, customButtonsOf, customButtonsSpec, escapeHtml, mobileLinkOf, mobilePageOf, phonePromptText, repliesOf, resetPhoneSeen, unreadPhoneReplies, digestDue, digestMessage, doctorReport, evaluateConditions, historyStats, inQuietHours, nextRunAfter, parseClock, parseCustomButtons, parseEvery, pushPayload, quietEndAt, todayKey, toastArgsOf } from '../index.js'
+import { mobileProxyPathOk, httpsLinkOf, mobileBarsOf, mobileCsvOf, mobileSettingsPatch, mobileViewOf, attachmentSummaryOf, mobileAttachmentsOf, uploadNameFor, condStateAfter, customButtonsOf, customButtonsSpec, escapeHtml, mobileLinkOf, mobilePageOf, phonePromptText, repliesOf, resetPhoneSeen, unreadPhoneReplies, digestDue, digestMessage, doctorReport, evaluateConditions, historyStats, inQuietHours, nextRunAfter, parseClock, parseCustomButtons, parseEvery, pushPayload, quietEndAt, todayKey, toastArgsOf } from '../index.js'
 
 let failed = 0
 function check(label, actual, expected) {
@@ -301,6 +301,17 @@ const settingsPage = mobilePageOf({ mobileToken: 'k', sound: true }, appEntries,
 check('设置有开关', settingsPage.includes('data-key="sound"') && settingsPage.includes('data-key="quietEnabled"'), true)
 check('设置有导出', settingsPage.includes('导出 CSV') && settingsPage.includes('/mobile/export'), true)
 check('设置显示当前状态', settingsPage.includes('日报时间'), true)
+
+
+// 0.25：https 入口只放行手机页
+check('mobileProxyPathOk 放行手机页', mobileProxyPathOk('/dsh-reminder-notify/mobile'), true)
+check('mobileProxyPathOk 放行子路径', mobileProxyPathOk('/dsh-reminder-notify/mobile/reply'), true)
+check('mobileProxyPathOk 拦住别的路由', mobileProxyPathOk('/dsh-reminder-notify/config'), false)
+check('mobileProxyPathOk 拦住根路径', mobileProxyPathOk('/'), false)
+
+const httpsSample = httpsLinkOf({ httpsPort: 1319, mobileToken: 'abc123' }, '', { address: '192.168.1.36' })
+check('httpsLinkOf 地址与端口', httpsSample, 'https://192.168.1.36:1319/dsh-reminder-notify/mobile?t=abc123')
+check('httpsLinkOf 端口夹在合法区间', httpsLinkOf({ httpsPort: 80, mobileToken: 'x' }, '', { address: '10.0.0.2' }).startsWith('https://10.0.0.2:1024/'), true)
 
 
 if (failed > 0) {
