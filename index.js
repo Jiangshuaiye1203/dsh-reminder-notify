@@ -45,6 +45,7 @@ export const Config = z === null ? undefined : z.object({
   audioDir: z.string().default('').description('提示音目录，留空 = 包内 assets/提示音导入/').volatile(),
   seconds: z.number().min(2).max(600).step(1).default(60).description('弹窗停留秒数（2–600）').volatile(),
   position: z.union(['br', 'center', 'tr']).default('br').description('弹窗位置：br 右下、center 居中、tr 右上').volatile(),
+  cardsEnabled: z.boolean().default(true).description('总开关：关掉后不再弹出任何提醒卡片（历史、日报推送照常）').volatile(),
   sound: z.boolean().default(true).description('是否播放提示音').volatile(),
   doneAudio: z.string().default('完成提醒语音.wav').description('done 档位的提示音文件名（wav / mp3，在提示音目录下）').volatile(),
   decideAudio: z.string().default('需要你来决定.wav').description('decide 档位的提示音文件名（wav / mp3）').volatile(),
@@ -251,6 +252,7 @@ function settingsOf(config) {
     audioDir: str(c.audioDir, BUNDLED_AUDIO_DIR),
     seconds: Math.round(clamp(num(c.seconds, 60), 2, 600)),
     position: POSITIONS.has(position) ? position : 'br',
+    cardsEnabled: c.cardsEnabled !== false,
     sound: c.sound !== false,
     doneAudio: str(c.doneAudio, '完成提醒语音.wav'),
     decideAudio: str(c.decideAudio, '需要你来决定.wav'),
@@ -917,6 +919,20 @@ async function notify(kind, args, settings) {
   const audio = audioNameOf(kind, settings)
   const speak = str(args.speak, settings.speakEnabled ? message : '')
 
+  if (settings.cardsEnabled === false) {
+    return {
+      ok: true,
+      skipped: 'cards-off',
+      kind,
+      title,
+      message,
+      seconds,
+      position: settings.position,
+      sound: false,
+      detail: '配置里关掉了「弹出窗口」，这张卡没有弹',
+    }
+  }
+
   if (settings.hostMode === 'exe') {
     const dir = clientDirOf(settings)
     const exePath = path.join(dir, EXE_NAME)
@@ -1520,7 +1536,7 @@ function registerPreviewRoute(ctx, getSettings) {
           const card = await notify(
             kind,
             { message: sample, seconds: Math.min(num(settings.seconds, 60), 20) },
-            { ...settings, quietEnabled: false },
+            { ...settings, quietEnabled: false, cardsEnabled: true },
           )
           return reply(res, 200, { ok: true, mode: 'card', kind, card })
         }
@@ -1867,6 +1883,16 @@ export function todayKey(now = new Date()) {
   return dayKeyOf(now.getTime())
 }
 
+// 0.31：日报去重看历史，不只看 volatile 的 digestLastDate——
+// 重装或恢复配置会把 digestLastDate 清空，历史里今天已经有同名日报就不再弹。
+export function digestShownToday(settings, entries, now = new Date()) {
+  const title = str(settings.digestTitle, '今日提醒日报')
+  const today = dayKeyOf(now.getTime())
+  return (Array.isArray(entries) ? entries : []).some(
+    (e) => dayKeyOf(num(e?.at, 0)) === today && str(e?.title, '') === title,
+  )
+}
+
 export function digestDue(settings, now = new Date()) {
   if (settings.digestEnabled !== true) return false
   const at = parseClock(settings.digestTime)
@@ -1992,7 +2018,19 @@ function registerDigestLoop(ctx, getSettings) {
     running = true
     try {
       const now = new Date()
-      if (digestDue(settings, now)) await runDigest(ctx, getSettings).catch(() => {})
+      if (digestDue(settings, now)) {
+        const entries = readHistory(settings)
+        const todayCount = entries.filter((e) => dayKeyOf(num(e?.at, 0)) === dayKeyOf(now.getTime())).length
+        if (digestShownToday(settings, entries, now)) {
+          // 已经发过（只是状态被重置了），补写状态，不再弹。
+          await saveBalanceState(ctx, { digestLastDate: todayKey(now) }).catch(() => {})
+        } else if (todayCount === 0) {
+          // 今天一条提醒都没有，日报没有意义，静默跳过。
+          await saveBalanceState(ctx, { digestLastDate: todayKey(now) }).catch(() => {})
+        } else {
+          await runDigest(ctx, getSettings).catch(() => {})
+        }
+      }
       if (settings.digestAlertCount > 0) {
         const today = todayKey(now)
         if (settings.digestAlertDate !== today) {
@@ -2321,7 +2359,7 @@ function registerDoctorRoute(ctx, getSettings) {
           const card = await notify(
             'raw',
             { title: '自检样卡', message: '这张卡由「运行自检」弹出，能看到就说明宿主正常。', seconds: 12 },
-            { ...settings, quietEnabled: false },
+            { ...settings, quietEnabled: false, cardsEnabled: true },
           )
           return reply(res, 200, { ok: true, mode: 'probe', card })
         }

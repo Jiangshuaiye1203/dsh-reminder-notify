@@ -135,6 +135,8 @@
         # Windows 专注助手 / 演示模式开着时自动静音
         focusAssistMute: true
         # 卡片回话也按上面的推送地址发到手机
+        # 总开关：关掉后不再弹出任何提醒卡片
+        cardsEnabled: true
         pushReply: true
         httpsEnabled: false
         httpsPort: 1319

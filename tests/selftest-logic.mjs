@@ -3,7 +3,7 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { mobileProxyPathOk, httpsLinkOf, mobileBarsOf, mobileCsvOf, mobileSettingsPatch, mobileViewOf, attachmentSummaryOf, mobileAttachmentsOf, uploadNameFor, condStateAfter, choicePromptText, choicesArgOf, normalizeChoices, resetChoiceSeen, unreadChoices, customButtonsOf, customButtonsSpec, escapeHtml, mobileLinkOf, mobilePageOf, phonePromptText, repliesOf, resetPhoneSeen, unreadPhoneReplies, digestDue, digestMessage, doctorReport, evaluateConditions, historyStats, inQuietHours, nextRunAfter, parseClock, parseCustomButtons, parseEvery, pushPayload, quietEndAt, todayKey, toastArgsOf } from '../index.js'
+import { mobileProxyPathOk, httpsLinkOf, mobileBarsOf, mobileCsvOf, mobileSettingsPatch, mobileViewOf, attachmentSummaryOf, mobileAttachmentsOf, uploadNameFor, condStateAfter, choicePromptText, choicesArgOf, normalizeChoices, resetChoiceSeen, unreadChoices, customButtonsOf, customButtonsSpec, escapeHtml, mobileLinkOf, mobilePageOf, phonePromptText, repliesOf, resetPhoneSeen, unreadPhoneReplies, digestDue, digestShownToday, digestMessage, doctorReport, evaluateConditions, historyStats, inQuietHours, nextRunAfter, parseClock, parseCustomButtons, parseEvery, pushPayload, quietEndAt, todayKey, toastArgsOf } from '../index.js'
 
 let failed = 0
 function check(label, actual, expected) {
@@ -81,6 +81,14 @@ check('08:59 还没到点', digestDue(base, at(8, 59)), false)
 check('09:00 到点发', digestDue(base, at(9, 0)), true)
 check('14:00 过点了也发（补发当天那条）', digestDue(base, at(14, 0)), true)
 check('今天已经发过就不发', digestDue({ ...base, digestLastDate: todayKey(at(9, 0)) }, at(14, 0)), false)
+
+// 0.31：日报去重改看历史（重装/恢复配置清空 digestLastDate 也不会重复弹）
+const todayAt = at(9, 0).getTime()
+const yesterdayAt = todayAt - 86400000
+check('历史里今天已有同名日报 → 视为已发', digestShownToday({ digestTitle: '今日提醒日报' }, [{ at: todayAt, title: '今日提醒日报' }], at(14, 0)), true)
+check('同名但昨天的不算', digestShownToday({ digestTitle: '今日提醒日报' }, [{ at: yesterdayAt, title: '今日提醒日报' }], at(14, 0)), false)
+check('标题不同不算', digestShownToday({ digestTitle: '今日提醒日报' }, [{ at: todayAt, title: '提醒有点多' }], at(14, 0)), false)
+check('没有历史不算', digestShownToday({ digestTitle: '今日提醒日报' }, [], at(14, 0)), false)
 check('关掉开关就不发', digestDue({ ...base, digestEnabled: false }, at(14, 0)), false)
 check('时间写错就不发', digestDue({ ...base, digestTime: '25:00' }, at(14, 0)), false)
 

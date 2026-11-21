@@ -56,7 +56,9 @@ const EXPORT_ROUTE = '/dsh-reminder-notify/export'
       groupBalance: 'DeepSeek 余额',
       groupHost: '宿主与路径',
       seconds: '停留秒数',
+      cardsEnabled: '弹出窗口',
       secondsHint: '2–600 秒，到点自动关闭。',
+      cardsEnabledHint: '关掉后一张卡都不弹（历史照常记录，日报和手机推送也不受影响）。',
       position: '弹窗位置',
       positionBr: '右下角',
       positionCenter: '屏幕居中',
@@ -161,7 +163,9 @@ const EXPORT_ROUTE = '/dsh-reminder-notify/export'
       groupBalance: 'DeepSeek balance',
       groupHost: 'Host and paths',
       seconds: 'Duration (seconds)',
+      cardsEnabled: 'Pop-up cards',
       secondsHint: '2–600 seconds, then it closes itself.',
+      cardsEnabledHint: 'Turn off to stop all pop-up cards (history and push still work).',
       position: 'Position',
       positionBr: 'Bottom right',
       positionCenter: 'Centred',
@@ -741,6 +745,7 @@ const EXPORT_ROUTE = '/dsh-reminder-notify/export'
 
     // 字段表：kind 决定控件类型，group 决定分组，缺省值来自宿主 config。
     const FIELDS = [
+      { key: 'cardsEnabled', group: 'basic', kind: 'boolean' },
       { key: 'seconds', group: 'basic', kind: 'number' },
       { key: 'position', group: 'basic', kind: 'select', options: ['br', 'center', 'tr'], optionLabels: ['positionBr', 'positionCenter', 'positionTr'] },
       { key: 'sound', group: 'basic', kind: 'boolean' },
@@ -825,6 +830,7 @@ const EXPORT_ROUTE = '/dsh-reminder-notify/export'
     ]
 
     const HINTS = {
+      cardsEnabled: 'cardsEnabledHint',
       seconds: 'secondsHint',
       sound: 'soundHint',
       cooldownMs: 'cooldownHint',
