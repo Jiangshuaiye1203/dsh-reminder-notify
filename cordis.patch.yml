@@ -94,4 +94,6 @@
         pushDecide: true
         # 日报同时推到手机
         pushDigest: true
+    pushChat: ""
+    maxHoldSeconds: 0
         retryHostOnce: true

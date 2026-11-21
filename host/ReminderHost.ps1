@@ -36,6 +36,7 @@ param(
     [string]$ResultPath = '',
     [int]$SnoozeMinutes = 10,
     [switch]$NoButtons,
+    [string]$OpenUrl = '',
     [switch]$Compact,
     [switch]$AutoCompact,
     [int]$QueueLeft = 0,
@@ -239,6 +240,11 @@ if ($showButtons) {
     $okRect = New-Object System.Drawing.Rectangle ($snoozeRect.Left - $buttonGap - $okWidth), $btnTop, $okWidth, $buttonHeight
     $script:btnRects['snooze'] = $snoozeRect
     $script:btnRects['ok'] = $okRect
+    if ($OpenUrl -ne '') {
+        $openWidth = 78
+        $openRect = New-Object System.Drawing.Rectangle ($okRect.Left - $buttonGap - $openWidth), $btnTop, $openWidth, $buttonHeight
+        $script:btnRects['open'] = $openRect
+    }
 }
 
 # ---- 定位：光标所在屏幕的工作区 ---------------------------------------------
@@ -340,7 +346,7 @@ $form.Add_Paint({
 
     # 按钮
     if ($showButtons) {
-        foreach ($key in @('ok', 'snooze')) {
+        foreach ($key in @('open', 'ok', 'snooze')) {
             $rect = $script:btnRects[$key]
             if ($rect -eq $null) { continue }
             $fill = if ($script:hover -eq $key) { $btnHoverColor } else { $btnColor }
@@ -355,7 +361,7 @@ $form.Add_Paint({
             $g.FillPath($btnBrush, $btnPath)
             $btnBrush.Dispose()
             $btnPath.Dispose()
-            $label = if ($key -eq 'ok') { $okText } else { $snoozeText }
+            $label = if ($key -eq 'ok') { $okText } elseif ($key -eq 'open') { '打开链接' } else { $snoozeText }
             $fmt = New-Object System.Drawing.StringFormat
             $fmt.Alignment = [System.Drawing.StringAlignment]::Center
             $fmt.LineAlignment = [System.Drawing.StringAlignment]::Center
@@ -413,12 +419,25 @@ function Close-With([string]$action) {
     Write-Log ('action ' + $action)
 }
 
+$form.KeyPreview = $true
+$form.Add_KeyDown({
+    param($sender, $e)
+    if ($e.KeyCode -eq [System.Windows.Forms.Keys]::Enter) { Close-With 'ok' }
+    elseif ($e.KeyCode -eq [System.Windows.Forms.Keys]::S) { Close-With 'snooze' }
+    elseif ($e.KeyCode -eq [System.Windows.Forms.Keys]::Escape) { Close-With 'dismiss' }
+})
+
 $form.Add_MouseDown({
     param($sender, $e)
     if ($script:phase -eq 'out') { return }
-    foreach ($key in @('ok', 'snooze')) {
+    foreach ($key in @('open', 'ok', 'snooze')) {
         $rect = $script:btnRects[$key]
         if ($rect -ne $null -and $rect.Contains($e.X, $e.Y)) {
+            if ($key -eq 'open' -and $OpenUrl -ne '') {
+                try { Start-Process $OpenUrl | Out-Null } catch { }
+                Close-With 'ok'
+                return
+            }
             Close-With $key
             return
         }

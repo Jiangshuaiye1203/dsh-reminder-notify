@@ -13,6 +13,15 @@ dsh plugin --profile desktop add link:<本目录绝对路径>
 
 装完新会话就有 `notify_user`。
 
+## 0.17 起多了什么
+
+- **定时提醒**：`notify_user` 支持 `at: "22:00"`（今天已过就排到明天）或 `inMinutes: 25`，到点才弹，不进队列占位。
+- **优先级**：`decide` 卡永远排在 `done`/`raw` 前面；`maxHoldSeconds` 可给任何卡设「最多挂多久」。
+- **卡片上的链接**：传 `url` 会在卡上加「打开链接」按钮；键盘 `Enter` 知道了、`S` 稍后提醒、`Esc` 关掉。
+- **历史导出**：面板「历史与统计」多了「导出 CSV / 导出 JSON」，文件落在桌面，统计里同时给近 30 天。
+- **更多推送格式**：除企业微信/Server酱/JSON/纯文本，还支持 Telegram（填 chat_id）、飞书、钉钉。
+- **服务契约第 2 版**：`ctx.get('reminder')` 现在带 `apiVersion`、`events()`（最近 20 条 shown/notified）和 `registerSource()`，别的插件也能挂自己的提醒来源。
+
 ## 用
 
 | 场景 | 调用 |

@@ -23,6 +23,7 @@ window.__ModuleLoader__.load({
     // 0.11 新增：提醒历史（GET 拿统计+最近记录，POST { mode: 'clear' } 清空）。
     const HISTORY_ROUTE = '/dsh-reminder-notify/history'
     const DOCTOR_ROUTE = '/dsh-reminder-notify/doctor'
+const EXPORT_ROUTE = '/dsh-reminder-notify/export'
     const DIGEST_ROUTE = '/dsh-reminder-notify/digest'
     // 下拉按扩展名分组：wav 一组、mp3 一组……组内按文件名排序，一眼能看出格式。
     function groupAudioFiles(files) {
@@ -307,6 +308,18 @@ window.__ModuleLoader__.load({
       quietModeHold: '留到结束后补弹',
       quietModeSkip: '直接跳过',
       pushFormatWecom: '企业微信机器人',
+      pushFormatTelegram: 'Telegram',
+      pushFormatFeishu: '飞书',
+      pushFormatDingtalk: '钉钉',
+      pushChat: '会话 ID（telegram）',
+      pushChatHint: 'telegram 机器人要填 chat_id；其它格式留空即可。',
+      maxHoldSeconds: '单卡最长停留（秒）',
+      maxHoldSecondsHint: '0 = 不额外限制（最多 600 秒）；填 30 就是任何卡最多挂 30 秒。',
+      exportCsv: '导出 CSV',
+      exportJson: '导出 JSON',
+      exportDone: '已导出到桌面：',
+      exportFailed: '导出失败：',
+      last30: '近 30 天：',
       pushFormatServerchan: 'Server 酱',
       pushFormatJson: '通用 JSON',
       pushFormatText: '纯文本',
@@ -447,6 +460,18 @@ window.__ModuleLoader__.load({
       quietModeHold: 'Hold until it ends',
       quietModeSkip: 'Skip it',
       pushFormatWecom: 'WeCom bot',
+      pushFormatTelegram: 'Telegram',
+      pushFormatFeishu: 'Feishu',
+      pushFormatDingtalk: 'DingTalk',
+      pushChat: 'Chat ID (Telegram)',
+      pushChatHint: 'Telegram bots need a chat_id; leave empty for other formats.',
+      maxHoldSeconds: 'Max card lifetime (s)',
+      maxHoldSecondsHint: '0 = no extra cap (600 s max); 30 means no card stays longer than 30 s.',
+      exportCsv: 'Export CSV',
+      exportJson: 'Export JSON',
+      exportDone: 'Exported to Desktop: ',
+      exportFailed: 'Export failed: ',
+      last30: 'Last 30 days: ',
       pushFormatServerchan: 'ServerChan',
       pushFormatJson: 'Generic JSON',
       pushFormatText: 'Plain text',
@@ -609,6 +634,7 @@ window.__ModuleLoader__.load({
       { key: 'queueEnabled', group: 'queue', kind: 'boolean' },
       { key: 'queueMax', group: 'queue', kind: 'number' },
       { key: 'mergeWindowMs', group: 'queue', kind: 'number' },
+      { key: 'maxHoldSeconds', group: 'queue', kind: 'number' },
       { key: 'quietEnabled', group: 'queue', kind: 'boolean' },
       { key: 'quietStart', group: 'queue', kind: 'text' },
       { key: 'quietEnd', group: 'queue', kind: 'text' },
@@ -624,7 +650,8 @@ window.__ModuleLoader__.load({
       { key: 'digestAlertCount', group: 'digest', kind: 'number' },
       { key: 'pushEnabled', group: 'digest', kind: 'boolean' },
       { key: 'pushUrl', group: 'digest', kind: 'text' },
-      { key: 'pushFormat', group: 'digest', kind: 'select', options: ['wecom', 'serverchan', 'json', 'text'], optionLabels: ['pushFormatWecom', 'pushFormatServerchan', 'pushFormatJson', 'pushFormatText'] },
+      { key: 'pushFormat', group: 'digest', kind: 'select', options: ['wecom', 'serverchan', 'telegram', 'feishu', 'dingtalk', 'json', 'text'], optionLabels: ['pushFormatWecom', 'pushFormatServerchan', 'pushFormatTelegram', 'pushFormatFeishu', 'pushFormatDingtalk', 'pushFormatJson', 'pushFormatText'] },
+      { key: 'pushChat', group: 'digest', kind: 'text' },
       { key: 'pushDecide', group: 'digest', kind: 'boolean' },
       { key: 'pushDigest', group: 'digest', kind: 'boolean' },
       { key: 'hostMode', group: 'host', kind: 'select', options: ['script', 'exe'], optionLabels: ['hostModeScript', 'hostModeExe'] },
@@ -637,6 +664,8 @@ window.__ModuleLoader__.load({
       seconds: 'secondsHint',
       sound: 'soundHint',
       cooldownMs: 'cooldownHint',
+      pushChat: 'pushChatHint',
+      maxHoldSeconds: 'maxHoldSecondsHint',
       retryHostOnce: 'retryHostOnceHint',
       doneAudio: 'audioHint',
       audioDir: 'audioDirHint',
@@ -1210,6 +1239,21 @@ window.__ModuleLoader__.load({
         historyFetch({ method: 'POST', headers: { 'content-type': 'application/json', accept: 'application/json' }, body: JSON.stringify({ mode: 'clear' }) })
       }
 
+      async function runExport(format) {
+        const label = typeof t === 'function' ? t : (key) => key
+        try {
+          const response = await fetch(`${EXPORT_ROUTE}?format=${format}&days=30`)
+          const data = await response.json()
+          if (data && data.ok === true) {
+            setMessage(`${label('exportDone')}${data.file}（${data.count} 条）`)
+          } else {
+            setMessage(`${label('exportFailed')}${(data && (data.detail || data.error)) || ''}`)
+          }
+        } catch (error) {
+          setMessage(`${label('exportFailed')}${String(error && error.message ? error.message : error)}`)
+        }
+      }
+
       function historyText() {
         const label = typeof t === 'function' ? t : (key) => key
         if (history === null) return label('historyLoading')
@@ -1373,6 +1417,16 @@ window.__ModuleLoader__.load({
                   'button',
                   { type: 'button', className: 'drn-btn small', disabled: historyBusy, onClick: clearHistory },
                   label('historyClear'),
+                ),
+                h(
+                  'button',
+                  { type: 'button', className: 'drn-btn drn-digest-btn', disabled: historyBusy, onClick: () => runExport('csv') },
+                  label('exportCsv'),
+                ),
+                h(
+                  'button',
+                  { type: 'button', className: 'drn-btn drn-digest-btn', disabled: historyBusy, onClick: () => runExport('json') },
+                  label('exportJson'),
                 ),
               ),
             ),

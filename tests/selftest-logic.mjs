@@ -54,6 +54,16 @@ const entries = [
   { at: now, kind: 'done', action: 'timeout' },
   { at: now - 86400000 * 2, kind: 'raw', action: 'ok' },
 ]
+
+// 0.17：30 天桶与三种新推送格式
+check('historyStats 给近 30 天桶', historyStats([]).last30.length, 30)
+check(
+  'pushPayload telegram 带 chat_id',
+  JSON.parse(pushPayload({ pushFormat: 'telegram', pushChat: '42' }, 'T', 'M').body).chat_id,
+  '42',
+)
+check('pushPayload 飞书用 msg_type', JSON.parse(pushPayload({ pushFormat: 'feishu' }, 'T', 'M').body).msg_type, 'text')
+check('pushPayload 钉钉用 markdown', JSON.parse(pushPayload({ pushFormat: 'dingtalk' }, 'T', 'M').body).markdown.title, 'T')
 const stats = historyStats(entries)
 check('stats.total', stats.total, 4)
 check('stats.byKind', stats.byKind, { done: 2, decide: 1, raw: 1 })

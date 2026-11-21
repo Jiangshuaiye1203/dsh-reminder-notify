@@ -99,7 +99,9 @@ export const Config = z === null ? undefined : z.object({
   digestAlertDate: z.string().default('').description('内部状态：上次弹条数预警的日期').volatile(),
   pushEnabled: z.boolean().default(false).description('把提醒同时推到手机（企业微信机器人 / Server酱 / 自定义 webhook）').volatile(),
   pushUrl: z.string().default('').description('推送地址，例如 https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=…').volatile(),
-  pushFormat: z.union(['wecom', 'serverchan', 'json', 'text']).default('wecom').description('推送格式：wecom 企业微信机器人、serverchan Server酱、json 通用 JSON、text 纯文本').volatile(),
+  pushFormat: z.union(['wecom', 'serverchan', 'json', 'text', 'telegram', 'feishu', 'dingtalk']).default('wecom').description('推送格式：wecom 企业微信机器人、serverchan Server酱、telegram、feishu 飞书、dingtalk 钉钉、json 通用 JSON、text 纯文本').volatile(),
+  pushChat: z.string().default('').description('telegram 用的 chat_id（只 telegram 格式需要）').volatile(),
+  maxHoldSeconds: z.number().min(0).max(3600).step(5).default(0).description('单张卡最长停留秒数（0 = 不额外限制，仍以 600 为上限）').volatile(),
   pushDecide: z.boolean().default(true).description('「需要你来决定」档位也推到手机').volatile(),
   pushDigest: z.boolean().default(true).description('日报同时推到手机').volatile(),
   retryHostOnce: z.boolean().default(true).description('宿主第一次没画出卡片时，自动静音重试一次').volatile(),
@@ -240,7 +242,9 @@ function settingsOf(config) {
     digestAlertDate: str(c.digestAlertDate, ''),
     pushEnabled: c.pushEnabled === true,
     pushUrl: typeof c.pushUrl === 'string' ? c.pushUrl.trim() : '',
-    pushFormat: ['wecom', 'serverchan', 'json', 'text'].includes(c.pushFormat) ? c.pushFormat : 'wecom',
+    pushFormat: ['wecom', 'serverchan', 'json', 'text', 'telegram', 'feishu', 'dingtalk'].includes(c.pushFormat) ? c.pushFormat : 'wecom',
+    pushChat: typeof c.pushChat === 'string' ? c.pushChat.trim() : '',
+    maxHoldSeconds: Math.round(clamp(num(c.maxHoldSeconds, 0), 0, 3600)),
     pushDecide: c.pushDecide !== false,
     pushDigest: c.pushDigest !== false,
     retryHostOnce: c.retryHostOnce !== false,
@@ -366,6 +370,7 @@ function argvOfScriptHost(o) {
   if (o.compact) argv.push('-Compact')
   if (o.autoCompact) argv.push('-AutoCompact')
   if (o.queueLeft > 0) argv.push('-QueueLeft', String(o.queueLeft))
+  if (o.openUrl) argv.push('-OpenUrl', String(o.openUrl))
   return argv
 }
 
@@ -440,6 +445,30 @@ export function quietEndAt(settings, now = new Date()) {
   return at.getTime()
 }
 
+function priorityOf(kind) {
+  // decide 是「要人来拍板」的，最优先；done 次之；raw 最低。
+  if (kind === 'decide') return 2
+  if (kind === 'done') return 1
+  return 0
+}
+
+// at="22:00"（今天已过则明天）或 inMinutes=N → 到点时间戳；都没给返回 0（立刻弹）。
+function dueAtOf(args) {
+  const minutes = num(args.inMinutes, NaN)
+  if (Number.isFinite(minutes) && minutes > 0) {
+    return Date.now() + Math.min(minutes, 7 * 24 * 60) * 60 * 1000
+  }
+  const clock = str(args.at, '')
+  if (clock === '') return 0
+  const target = parseClock(clock)
+  if (target === null) return 0
+  const now = new Date()
+  const at = new Date(now.getTime())
+  at.setHours(Math.floor(target / 60), target % 60, 0, 0)
+  if (at.getTime() <= now.getTime()) at.setDate(at.getDate() + 1)
+  return at.getTime()
+}
+
 function enqueue(item) {
   const settings = item.settings
   if (!settings.queueEnabled) {
@@ -452,7 +481,7 @@ function enqueue(item) {
     return { queued: false, position: 0 }
   }
   const now = Date.now()
-  if (settings.mergeWindowMs > 0) {
+  if (settings.mergeWindowMs > 0 && !((item.dueAt ?? 0) > now)) {
     const pending = queue.find(
       (other) =>
         other.kind === item.kind &&
@@ -477,17 +506,27 @@ function enqueue(item) {
 function pump() {
   if (active !== null) return
   const now = Date.now()
-  const index = queue.findIndex((item) => (item.holdUntil ?? 0) <= now)
-  if (index < 0) {
-    // 全都在免打扰时段里攒着：睡到最早那一条的放行时间再看
-    const next = queue.reduce((min, item) => Math.min(min, item.holdUntil ?? Infinity), Infinity)
+  // 0.17：到点的（既不在免打扰里、也过了定时时间）才放；decide 永远排在前面。
+  const ready = queue.filter(
+    (item) => (item.holdUntil ?? 0) <= now && (item.dueAt ?? 0) <= now,
+  )
+  if (ready.length === 0) {
+    // 剩下的要么在免打扰时段里，要么是定时提醒：睡到最早那个时间点再看
+    const next = queue.reduce((min, item) => {
+      const when = Math.max(item.holdUntil ?? 0, item.dueAt ?? 0)
+      return when > now ? Math.min(min, when) : min
+    }, Infinity)
     if (Number.isFinite(next)) {
       const timer = setTimeout(() => pump(), Math.max(1000, Math.min(next - now, 60 * 60 * 1000)))
       if (typeof timer.unref === 'function') timer.unref()
     }
     return
   }
-  const [item] = queue.splice(index, 1)
+  ready.sort(
+    (a, b) => (b.priority ?? 0) - (a.priority ?? 0) || (a.createdAt ?? 0) - (b.createdAt ?? 0),
+  )
+  const item = ready[0]
+  queue.splice(queue.indexOf(item), 1)
   active = item
   showItem(item)
     .catch(() => {})
@@ -520,6 +559,7 @@ async function showItem(item) {
     icon: extras.icon,
     speak: item.speak,
     resultPath: resultFile,
+    openUrl: str(item.url, ''),
     buttonsEnabled: settings.buttonsEnabled,
     snoozeMinutes: settings.snoozeMinutes,
     autoCompact: settings.compactOnFullscreen,
@@ -601,7 +641,10 @@ async function notify(kind, args, settings) {
   const kindMessageTemplate = str(settings[`${kind}MessageTemplate`], '')
   const title = renderTemplate(kindTitleTemplate !== '' ? kindTitleTemplate : settings.titleTemplate, '{title}', vars)
   const message = renderTemplate(kindMessageTemplate !== '' ? kindMessageTemplate : settings.messageTemplate, '{message}', vars)
-  const seconds = Math.round(clamp(num(args.seconds, settings.seconds), 2, 600))
+  const secondsWanted = Math.round(clamp(num(args.seconds, settings.seconds), 2, 600))
+  // 0.17：单卡最长停留（maxHoldSeconds>0 时再压一道），避免 decide 卡一直挂在屏幕上。
+  const seconds =
+    settings.maxHoldSeconds > 0 ? Math.min(secondsWanted, settings.maxHoldSeconds) : secondsWanted
   const sound = args.sound === false ? false : settings.sound
   const audio = audioNameOf(kind, settings)
   const speak = str(args.speak, settings.speakEnabled ? message : '')
@@ -707,11 +750,16 @@ async function notify(kind, args, settings) {
   }
   const holdUntil = quiet ? quietEndAt(settings) : 0
 
+  const dueAt = dueAtOf(args)
+  const openUrl = str(args.url, '')
   const item = {
     kind,
     title,
     message,
     seconds,
+    url: openUrl,
+    dueAt,
+    priority: priorityOf(kind),
     sound: sound && audioPath !== '',
     audioPath,
     audioMissing,
@@ -724,6 +772,12 @@ async function notify(kind, args, settings) {
     holdUntil,
   }
   const placement = enqueue(item)
+  emitServiceEvent('notified', {
+    kind,
+    title,
+    queued: placement.queued === true || placement.merged === true,
+    scheduledAt: dueAt > 0 ? new Date(dueAt).toISOString() : '',
+  })
   return {
     ok: true,
     hostMode: 'script',
@@ -744,6 +798,8 @@ async function notify(kind, args, settings) {
     count: placement.count,
     quiet: quiet || undefined,
     holdUntil: holdUntil > 0 ? new Date(holdUntil).toISOString() : undefined,
+    url: openUrl !== '' ? openUrl : undefined,
+    scheduledAt: dueAt > 0 ? new Date(dueAt).toISOString() : undefined,
   }
 }
 
@@ -764,6 +820,19 @@ const parameters = {
       type: 'string',
       description:
         '用系统语音念出来的句子（不弹窗也能念）。不传时：插件里开了「语音朗读」就念正文，否则不念。',
+    },
+    url: {
+      type: 'string',
+      description: '卡片上带一个「打开链接」按钮，点了会用默认浏览器打开这个地址（https 开头）。',
+    },
+    at: {
+      type: 'string',
+      description:
+        '定时提醒：HH:MM（24 小时制）。到点才弹；今天这个时间已经过了就排到明天，最多等到 24 小时内。',
+    },
+    inMinutes: {
+      type: 'number',
+      description: '定时提醒：多少分钟之后弹（1–10080）。和 at 同时给时以 inMinutes 为准。',
     },
   },
 }
@@ -810,6 +879,7 @@ const CONFIG_ROUTE = '/dsh-reminder-notify/config'
 const PREVIEW_ROUTE = '/dsh-reminder-notify/preview'
 const BALANCE_ROUTE = '/dsh-reminder-notify/balance'
 const HISTORY_ROUTE = '/dsh-reminder-notify/history'
+const EXPORT_ROUTE = '/dsh-reminder-notify/export'
 const DIGEST_ROUTE = '/dsh-reminder-notify/digest'
 
 // 面板要「把音频目录里的文件列成下拉」，但 Client 侧没有任何读文件能力，
@@ -1329,6 +1399,13 @@ export function historyStats(entries) {
     d.setDate(d.getDate() - i)
     buckets.set(dayKey(d.getTime()), 0)
   }
+  // 0.17：再给一份 30 天桶，面板画趋势图用（前 7 天与上面完全一致）。
+  const monthBuckets = new Map()
+  for (let i = 29; i >= 0; i -= 1) {
+    const d = new Date()
+    d.setDate(d.getDate() - i)
+    monthBuckets.set(dayKey(d.getTime()), 0)
+  }
   const today = dayKey(Date.now())
   let todayCount = 0
   for (const entry of entries) {
@@ -1340,6 +1417,7 @@ export function historyStats(entries) {
     const key = dayKey(num(entry.at, 0))
     if (key === today) todayCount += 1
     if (buckets.has(key)) buckets.set(key, buckets.get(key) + 1)
+    if (monthBuckets.has(key)) monthBuckets.set(key, monthBuckets.get(key) + 1)
   }
   return {
     total: entries.length,
@@ -1347,6 +1425,7 @@ export function historyStats(entries) {
     byKind,
     byAction,
     last7: [...buckets.entries()].map(([date, count]) => ({ date, count })),
+    last30: [...monthBuckets.entries()].map(([date, count]) => ({ date, count })),
   }
 }
 
@@ -1406,6 +1485,21 @@ export function pushPayload(settings, title, message, extra = {}) {
   }
   if (settings.pushFormat === 'text') {
     return { headers: { 'content-type': 'text/plain; charset=utf-8' }, body: `${title}\n${body}` }
+  }
+  if (settings.pushFormat === 'telegram') {
+    return {
+      headers: json,
+      body: JSON.stringify({ chat_id: str(settings.pushChat, ''), text: `${title}\n${body}` }),
+    }
+  }
+  if (settings.pushFormat === 'feishu') {
+    return { headers: json, body: JSON.stringify({ msg_type: 'text', content: { text: `${title}\n${body}` } }) }
+  }
+  if (settings.pushFormat === 'dingtalk') {
+    return {
+      headers: json,
+      body: JSON.stringify({ msgtype: 'markdown', markdown: { title, text: `### ${title}\n\n${body}` } }),
+    }
   }
   if (settings.pushFormat === 'wecom') {
     return { headers: json, body: JSON.stringify({ msgtype: 'text', text: { content: `${title}\n${body}` } }) }
@@ -1780,6 +1874,67 @@ function registerDoctorRoute(ctx, getSettings) {
   }, 'dsh-reminder-notify: doctor route')
 }
 
+// 0.17：历史导出 —— 面板点一下，CSV/JSON 落到桌面，方便拿去算账或贴给别人。
+function exportHistoryFile(settings, entries, format, days) {
+  const since = Date.now() - Math.max(1, days) * 24 * 60 * 60 * 1000
+  const rows = entries.filter((entry) => num(entry?.at, 0) >= since)
+  const stamp = new Date()
+  const pad = (n) => String(n).padStart(2, '0')
+  const name = `提醒历史-${stamp.getFullYear()}${pad(stamp.getMonth() + 1)}${pad(stamp.getDate())}-${pad(stamp.getHours())}${pad(stamp.getMinutes())}.${format}`
+  const dir = path.join(os.homedir(), 'Desktop')
+  const file = path.join(dir, name)
+  if (format === 'json') {
+    fs.writeFileSync(file, JSON.stringify(rows, null, 2), 'utf8')
+    return { file, count: rows.length }
+  }
+  const cell = (value) => `"${String(value ?? '').replace(/"/g, '""').replace(/\r?\n/g, ' ')}"`
+  const lines = ['时间,档位,标题,正文,处理方式,条数,稍后提醒,免打扰']
+  for (const entry of rows) {
+    lines.push(
+      [
+        new Date(num(entry.at, 0)).toISOString(),
+        cell(entry.kind),
+        cell(entry.title),
+        cell(entry.message),
+        cell(entry.action),
+        num(entry.count, 1),
+        entry.snoozed === true ? '是' : '否',
+        entry.quiet === true ? '是' : '否',
+      ].join(','),
+    )
+  }
+  fs.mkdirSync(dir, { recursive: true })
+  fs.writeFileSync(file, lines.join('\r\n'), 'utf8')
+  return { file, count: rows.length }
+}
+
+function registerExportRoute(ctx, getSettings) {
+  const web = ctx.get('webServer')
+  if (web === null || web === undefined || typeof web.register !== 'function') return
+  const reply = (res, status, payload) => {
+    res.statusCode = status
+    res.setHeader('content-type', 'application/json; charset=utf-8')
+    res.end(JSON.stringify(payload))
+  }
+  const dispose = web.register({
+    kind: 'exact',
+    path: EXPORT_ROUTE,
+    handler: (req, res) => {
+      try {
+        const settings = getSettings()
+        const url = new URL(req.url ?? EXPORT_ROUTE, 'http://127.0.0.1')
+        const format = url.searchParams.get('format') === 'json' ? 'json' : 'csv'
+        const days = Math.round(clamp(num(url.searchParams.get('days'), 30), 1, 365))
+        const result = exportHistoryFile(settings, readHistory(settings), format, days)
+        reply(res, 200, { ok: true, format, days, file: result.file, count: result.count })
+      } catch (error) {
+        reply(res, 500, { ok: false, error: 'export-failed', detail: String(error?.message ?? error) })
+      }
+    },
+  })
+  ctx.effect(() => dispose, 'dsh-reminder-notify: history export route')
+}
+
 function registerHistoryRoute(ctx, getSettings) {
   const web = typeof ctx.get === 'function' ? ctx.get('webServer') : undefined
   if (web === undefined || web === null || typeof web.register !== 'function') {
@@ -1842,10 +1997,36 @@ function packageVersion() {
  * 0.15 起对外提供的服务：让别的插件也能发提醒、发日报、读统计，而不用自己起宿主。
  * 全部方法是 fire-and-forget 语义（返回 Promise，失败只在返回值里体现），不会抛给调用方。
  */
+const serviceEvents = []
+const sourceHandlers = new Map()
+
+// 0.17：服务契约升到 2 —— 版本号、事件流、以及「别的插件也能注册提醒来源」。
+export function emitServiceEvent(type, payload = {}) {
+  const event = { type, at: Date.now(), payload }
+  serviceEvents.push(event)
+  if (serviceEvents.length > 60) serviceEvents.shift()
+  for (const handler of sourceHandlers.values()) {
+    try {
+      handler(event)
+    } catch {
+      // 别人的 handler 崩了不该影响弹卡
+    }
+  }
+  return event
+}
+
 export function serviceOf(ctx, getSettings) {
   return {
     name: 'dsh-reminder-notify',
     version: packageVersion(),
+    // 0.17：契约第 2 版 —— 多了事件流与「别的插件也能注册提醒来源」。
+    apiVersion: 2,
+    events: () => serviceEvents.slice(-20),
+    registerSource: (name, handler) => {
+      const key = String(name ?? '').trim() || `source-${sourceHandlers.size + 1}`
+      sourceHandlers.set(key, typeof handler === 'function' ? handler : () => {})
+      return () => sourceHandlers.delete(key)
+    },
     /** 发一张提醒卡。kind: done | decide | raw；options 同 notify_user 的参数。 */
     notify: (kind, options = {}) => notify(nodeKind(kind), options || {}, getSettings()),
     /** 立刻发一条日报（force: true 时忽略「今天已经发过」和「日报未开启」）。 */
@@ -1874,6 +2055,7 @@ export function apply(ctx, config) {
   registerPreviewRoute(ctx, () => settingsOf(config))
   registerBalanceRoute(ctx, () => settingsOf(config), config)
   registerHistoryRoute(ctx, () => settingsOf(config))
+  registerExportRoute(ctx, () => settingsOf(config))
   registerDigestRoute(ctx, () => settingsOf(config))
   registerDigestLoop(ctx, () => settingsOf(config))
   registerDoctorRoute(ctx, () => settingsOf(config))
