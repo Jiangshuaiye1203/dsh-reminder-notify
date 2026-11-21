@@ -2358,7 +2358,8 @@ li { background: #1b212b; border-radius: 10px; padding: 10px 12px; margin-bottom
 .meta { display: flex; gap: 8px; color: #8b98a8; font-size: 12px; margin-bottom: 4px; }
 .msg { font-size: 14px; word-break: break-word; }
 .reply { margin-top: 4px; color: #7dd3a0; font-size: 13px; }
-form { display: flex; gap: 8px; position: sticky; bottom: 0; background: #14181f; padding-top: 8px; }
+form { display: flex; gap: 8px; padding-bottom: 8px; }
+.foot { position: sticky; bottom: 0; background: #14181f; padding-top: 8px; border-top: 1px solid #202834; }
 input { flex: 1; padding: 11px 12px; border-radius: 10px; border: 1px solid #2b3442; background: #1b212b; color: #e6edf3; font-size: 15px; }
 button { padding: 11px 16px; border-radius: 10px; border: 0; background: #2f81f7; color: #fff; font-size: 15px; }
 .att { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 12px 8px; }
@@ -2380,6 +2381,7 @@ button { padding: 11px 16px; border-radius: 10px; border: 0; background: #2f81f7
   <div class="stat"><b>${stats.byKind.decide ?? 0}</b><span>要你决定</span></div>
 </div>
 <ul>${rows === '' ? '<li><div class="msg">还没有提醒</div></li>' : rows}</ul>
+<div class="foot">
 <div id="att" class="att"></div>
 <div class="pick">
 <button type="button" id="pickImg">拍照 / 选图</button>
@@ -2389,6 +2391,7 @@ button { padding: 11px 16px; border-radius: 10px; border: 0; background: #2f81f7
 <input type="file" id="fileImg" accept="image/*" capture="environment" hidden>
 <input type="file" id="fileAudio" accept="audio/*" hidden>
 <form id="f"><input id="m" maxlength="300" placeholder="回一句话给电脑上的模型"><button type="submit">发送</button></form>
+</div>
 <div id="tip"></div>
 <script>
 // 局域网是 http，浏览器把这种页面当「不安全来源」：service worker 注册不了，

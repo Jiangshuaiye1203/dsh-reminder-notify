@@ -39,6 +39,7 @@ dsh plugin --profile desktop add link:<本目录绝对路径>
 - 带附件的回话进历史时记成 `附件 N`，提示词里写成「手机回话：…（附 2 个：a.png、b.webm）」，模型能看到文件名并自己去读。
 - 上传走 `POST /dsh-reminder-notify/mobile/upload?t=<口令>`（body 是原始文件字节，`content-type` 决定扩展名；
   支持 jpg/png/webp/gif/wav/mp3/m4a/ogg/webm）。
+- 0.23.1：把「拍照 / 选图 / 录音」和输入框一起吸在页面底部——之前它们排在长列表末尾，手机上一进页面根本看不到。
 
 
 ## 0.21 起多了什么
