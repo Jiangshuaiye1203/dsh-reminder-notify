@@ -40,6 +40,7 @@ param(
     [switch]$Reply,
     [string]$CustomButtons = '',
     [string]$Choices = '',
+    [switch]$ChoicesOther,
     [switch]$RespectFocus,
     [switch]$Compact,
     [switch]$AutoCompact,
@@ -223,6 +224,8 @@ if ($showButtons -and -not [string]::IsNullOrWhiteSpace($Choices)) {
     }
 }
 $showReply = ($Reply -and $showButtons)
+$showOther = ($ChoicesOther -and $showReply -and $choiceList.Count -gt 0)
+$script:otherRect = $null
 
 $titleSize = 11.5
 $bodySize = 9.5
@@ -287,6 +290,8 @@ foreach ($choiceLabel in $choiceList) {
     $sz = $measureGfx.MeasureString($choiceLabel, $btnFont)
     $choiceWidths += ([int][Math]::Ceiling($sz.Width) + 20)
 }
+$otherWidth = 0
+if ($showOther) { $sz = $measureGfx.MeasureString('其他…', $btnFont); $otherWidth = [int][Math]::Ceiling($sz.Width) + 20 }
 $measureGfx.Dispose()
 $measureBmp.Dispose()
 
@@ -340,6 +345,10 @@ if ($showButtons) {
             $script:choiceRects += ,@($r, $i)
             $hx = $hx + $w + 6
         }
+        if ($showOther) {
+            if (($hx + $otherWidth) -gt ($width - $padX)) { $hx = $accentWidth + $padX; $hy = $hy + $buttonHeight + 6 }
+            $script:otherRect = New-Object System.Drawing.Rectangle $hx, $hy, $otherWidth, $buttonHeight
+        }
     }
 }
 
@@ -387,6 +396,7 @@ $script:replyBox = $null
 $script:replyRect = $null
 $script:replyText = ''
 $script:choiceLabel = ''
+$script:choiceOther = $false
 if ($showReply) {
     $boxTop = $height - $padX - $buttonsHeight - 6 - $customRowHeight - $choiceRowHeight - 26
     $boxWidth = $width - $accentWidth - $padX - $padX
@@ -551,6 +561,34 @@ $form.Add_Paint({
         $labelBrush.Dispose()
         $fmt.Dispose()
     }
+
+    # 「其他…」：虚线边框按钮，点了聚焦回话框
+    if ($showOther -and $script:otherRect -ne $null) {
+        $orect = $script:otherRect
+        $ofill = if ($script:hover -eq 'o') { $btnHoverColor } else { $btnColor }
+        $opath = New-Object System.Drawing.Drawing2D.GraphicsPath
+        $r3 = 8
+        $opath.AddArc($orect.X, $orect.Y, $r3 * 2, $r3 * 2, 180, 90)
+        $opath.AddArc($orect.Right - $r3 * 2, $orect.Y, $r3 * 2, $r3 * 2, 270, 90)
+        $opath.AddArc($orect.Right - $r3 * 2, $orect.Bottom - $r3 * 2, $r3 * 2, $r3 * 2, 0, 90)
+        $opath.AddArc($orect.X, $orect.Bottom - $r3 * 2, $r3 * 2, $r3 * 2, 90, 90)
+        $opath.CloseFigure()
+        $obrush = New-Object System.Drawing.SolidBrush $ofill
+        $g.FillPath($obrush, $opath)
+        $obrush.Dispose()
+        $openColor = [System.Drawing.Color]::FromArgb(120, 130, 145)
+        $open = New-Object System.Drawing.Pen $openColor, 1
+        $g.DrawPath($open, $opath)
+        $open.Dispose()
+        $opath.Dispose()
+        $ofmt = New-Object System.Drawing.StringFormat
+        $ofmt.Alignment = [System.Drawing.StringAlignment]::Center
+        $ofmt.LineAlignment = [System.Drawing.StringAlignment]::Center
+        $otb = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(230, 237, 243))
+        $g.DrawString('其他…', $btnFont, $otb, (New-Object System.Drawing.RectangleF $orect.X, $orect.Y, $orect.Width, $orect.Height), $ofmt)
+        $otb.Dispose()
+        $ofmt.Dispose()
+    }
 })
 
 # ---- 淡入 / 停留 / 淡出 ------------------------------------------------------
@@ -625,6 +663,17 @@ $form.Add_MouseDown({
         return
     }
 
+    # 「其他…」：记下选择并聚焦回话框，用户输入后按 Enter
+    if ($showOther -and $script:otherRect -ne $null -and $script:otherRect.Contains($e.X, $e.Y)) {
+        $script:choiceLabel = '其他'
+        $script:choiceOther = $true
+        if ($script:replyBox -ne $null) {
+            try { $form.Activate(); $script:replyBox.Focus(); $script:replyBox.SelectionStart = $script:replyBox.TextLength } catch { }
+            Write-Log 'choice other -> focus reply'
+            return
+        }
+    }
+
     # 决定卡候选项（点了就当作「选它」）
     foreach ($pair in $script:choiceRects) {
         if ($pair[0].Contains($e.X, $e.Y)) {
@@ -685,6 +734,7 @@ $form.Add_MouseMove({
     foreach ($pair in $script:choiceRects) {
         if ($pair[0].Contains($e.X, $e.Y)) { $next = ('h' + $pair[1]) }
     }
+    if ($showOther -and $script:otherRect -ne $null -and $script:otherRect.Contains($e.X, $e.Y)) { $next = 'o' }
     if ($script:replyRect -ne $null -and $script:replyRect.Contains($e.X, $e.Y)) {
         $form.Cursor = [System.Windows.Forms.Cursors]::IBeam
         return
@@ -784,7 +834,8 @@ if (-not [string]::IsNullOrEmpty($ResultPath)) {
             snooze    = $(if ($script:action -eq 'snooze') { [Math]::Max(1, $SnoozeMinutes) } else { 0 })
             reply     = $(if ($script:action -eq 'replied') { $script:replyText } else { '' })
             button    = $(if ($script:action -eq 'custom') { $script:btnLabel } else { '' })
-            choice    = $(if ($script:action -eq 'choice') { $script:choiceLabel } else { '' })
+            choice    = $(if ($script:action -eq 'choice' -or $script:choiceOther) { $script:choiceLabel } else { '' })
+            choiceOther = [bool]$script:choiceOther
             focusAssist = $script:focusAssist
         }
         $json = ($payload | ConvertTo-Json -Compress)

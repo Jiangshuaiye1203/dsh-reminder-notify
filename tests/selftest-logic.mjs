@@ -3,7 +3,7 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { mobileProxyPathOk, httpsLinkOf, mobileBarsOf, mobileCsvOf, mobileSettingsPatch, mobileViewOf, attachmentSummaryOf, mobileAttachmentsOf, uploadNameFor, condStateAfter, choicePromptText, choicesArgOf, normalizeChoices, resetChoiceSeen, unreadChoices, customButtonsOf, customButtonsSpec, escapeHtml, mobileLinkOf, mobilePageOf, phonePromptText, repliesOf, resetPhoneSeen, unreadPhoneReplies, digestDue, digestShownToday, digestMessage, doctorReport, evaluateConditions, historyStats, inQuietHours, nextRunAfter, parseClock, parseCustomButtons, parseEvery, pushPayload, quietEndAt, todayKey, toastArgsOf, feedbackEntryOf, issueUrlOf, envSummaryOf, statsOf, feedbackPathOf, backupNow, listBackups, readBackup, backupDirOf } from '../index.js'
+import { mobileProxyPathOk, httpsLinkOf, mobileBarsOf, mobileCsvOf, mobileSettingsPatch, mobileViewOf, attachmentSummaryOf, mobileAttachmentsOf, uploadNameFor, condStateAfter, choicePromptText, choicesArgOf, normalizeChoices, resetChoiceSeen, unreadChoices, customButtonsOf, customButtonsSpec, escapeHtml, mobileLinkOf, mobilePageOf, phonePromptText, repliesOf, resetPhoneSeen, unreadPhoneReplies, digestDue, digestShownToday, digestMessage, doctorReport, evaluateConditions, historyStats, inQuietHours, nextRunAfter, parseClock, parseCustomButtons, parseEvery, pushPayload, quietEndAt, todayKey, toastArgsOf, feedbackEntryOf, issueUrlOf, envSummaryOf, statsOf, feedbackPathOf, backupNow, listBackups, readBackup, backupDirOf, parseDays, daysLabelOf, nextRunWithDays } from '../index.js'
 
 let failed = 0
 function check(label, actual, expected) {
@@ -389,6 +389,35 @@ check('readBackup 读回 values', [roundTrip.values.seconds, roundTrip.values.pu
 check('readBackup 坏文件返回 null', readBackup(path.join(tmpBackupDir, 'nope.json')), null)
 for (const item of backupFiles) fs.unlinkSync(path.join(tmpBackupDir, item.name))
 fs.rmdirSync(tmpBackupDir)
+
+
+// ---- 0.34：周期提醒按周几 + 决定卡「其他…」 ----
+check('parseDays 工作日', parseDays('weekdays'), [1, 2, 3, 4, 5])
+check('parseDays 中文工作日', parseDays('工作日'), [1, 2, 3, 4, 5])
+check('parseDays 周末', parseDays('weekend'), [0, 6])
+check('parseDays 列表去重排序', parseDays('5,1,3,3'), [1, 3, 5])
+check('parseDays 非法', parseDays('hello'), null)
+check('parseDays 空', parseDays(''), null)
+check('daysLabelOf 工作日', daysLabelOf([1, 2, 3, 4, 5]), '工作日')
+check('daysLabelOf 周末', daysLabelOf([0, 6]), '周末')
+check('daysLabelOf 单日', daysLabelOf([3]), '周三')
+check('daysLabelOf 全周', daysLabelOf([0, 1, 2, 3, 4, 5, 6]), '每天')
+// 2026-11-21 是周六（6）；每 60 分钟、只在工作日 → 下一次应是周一
+const sat = new Date(2026, 10, 21, 10, 0, 0, 0).getTime()
+const nextWorkday = nextRunWithDays(sat, 60, [1, 2, 3, 4, 5], sat)
+check('nextRunWithDays 跳过周末', new Date(nextWorkday).getDay(), 1)
+check('nextRunWithDays 不传 days 等价 nextRunAfter', nextRunWithDays(sat, 60, null, sat), nextRunAfter(sat, 60, sat))
+
+const otherHistory = path.join(os.tmpdir(), 'drn-choice-other.json')
+fs.writeFileSync(otherHistory, JSON.stringify([
+  { at: 1795200000000, kind: 'decide', title: '选哪个', action: 'replied', choice: '其他', choiceOther: true, reply: '我自己想的方案 C' },
+  { at: 1795200000001, kind: 'decide', title: '普通回话', action: 'replied', reply: '只是回话' },
+], null, 2))
+resetChoiceSeen(0)
+const otherPrompt = choicePromptText({ historyFile: otherHistory }, 1795200009999)
+check('choicePromptText 带上「其他」内容', otherPrompt.includes('其他：我自己想的方案 C'), true)
+check('choicePromptText 不把纯回话当选择', otherPrompt.includes('普通回话'), false)
+fs.unlinkSync(otherHistory)
 
 
 if (failed > 0) {

@@ -45,6 +45,9 @@ export const Config = z === null ? undefined : z.object({
   audioDir: z.string().default('').description('提示音目录，留空 = 包内 assets/提示音导入/').volatile(),
   seconds: z.number().min(2).max(600).step(1).default(60).description('弹窗停留秒数（2–600）').volatile(),
   position: z.union(['br', 'center', 'tr']).default('br').description('弹窗位置：br 右下、center 居中、tr 右上').volatile(),
+  muteDone: z.boolean().default(false).description('「完成」卡不弹，只记历史').volatile(),
+  muteDecide: z.boolean().default(false).description('「需要你来决定」卡不弹，只记历史').volatile(),
+  muteRaw: z.boolean().default(false).description('「普通」卡不弹，只记历史').volatile(),
   cardsEnabled: z.boolean().default(true).description('总开关：关掉后不再弹出任何提醒卡片（历史、日报推送照常）').volatile(),
   backupEnabled: z.boolean().default(true).description('自动备份配置到本机（每天一份，恢复时可回滚）').volatile(),
   backupDir: z.string().default('').description('备份目录，留空用 ~/.dsh/dsh-reminder-notify/backups').volatile(),
@@ -259,6 +262,9 @@ function settingsOf(config) {
     audioDir: str(c.audioDir, BUNDLED_AUDIO_DIR),
     seconds: Math.round(clamp(num(c.seconds, 60), 2, 600)),
     position: POSITIONS.has(position) ? position : 'br',
+    muteDone: c.muteDone === true,
+    muteDecide: c.muteDecide === true,
+    muteRaw: c.muteRaw === true,
     cardsEnabled: c.cardsEnabled !== false,
     statsEnabled: c.statsEnabled !== false,
     backupEnabled: c.backupEnabled !== false,
@@ -514,6 +520,7 @@ function argvOfScriptHost(o) {
   if (o.replyEnabled) argv.push('-Reply')
   if (o.customButtons) argv.push('-CustomButtons', String(o.customButtons))
   if (o.choices) argv.push('-Choices', String(o.choices))
+  if (o.allowOther && o.choices) argv.push('-ChoicesOther')
   if (o.focusAssistMute) argv.push('-RespectFocus')
   return argv
 }
@@ -585,6 +592,42 @@ export function nextRunAfter(prevMs, everyMinutes, nowMs) {
   return next
 }
 
+
+// 0.34：星期规则。'weekdays' 周一到周五；'weekend' 周六周日；'1,3,5' 指定星期（0=周日）；空 = 每天都行。
+export function parseDays(text) {
+  const raw = str(text, '').trim().toLowerCase()
+  if (raw === '') return null
+  if (raw === 'weekdays' || raw === 'workday' || raw === '工作日') return [1, 2, 3, 4, 5]
+  if (raw === 'weekend' || raw === '周末') return [0, 6]
+  const list = raw
+    .split(/[,\s]+/)
+    .map((item) => Number(item))
+    .filter((item) => Number.isInteger(item) && item >= 0 && item <= 6)
+  return list.length === 0 ? null : Array.from(new Set(list)).sort((a, b) => a - b)
+}
+
+export function daysLabelOf(days) {
+  if (!Array.isArray(days) || days.length === 0) return ''
+  const names = ['日', '一', '二', '三', '四', '五', '六']
+  if (days.length === 7) return '每天'
+  const sorted = days.slice().sort((a, b) => a - b).join(',')
+  if (sorted === '1,2,3,4,5') return '工作日'
+  if (sorted === '0,6') return '周末'
+  return '周' + days.map((day) => names[day]).join('、')
+}
+
+// 在 nextRunAfter 的基础上跳过错过的星期；只在最近 14 天内找，找不到就退回普通推进。
+export function nextRunWithDays(prevMs, everyMinutes, days, nowMs) {
+  const allowed = Array.isArray(days) && days.length > 0 ? days : null
+  let next = nextRunAfter(prevMs, everyMinutes, null, nowMs)
+  if (allowed === null) return next
+  for (let guard = 0; guard < 400; guard += 1) {
+    if (allowed.includes(new Date(next).getDay())) return next
+    next = nextRunAfter(next, everyMinutes, null, next)
+  }
+  return next
+}
+
 function recurringPathOf(settings) {
   if (settings.recurringFile !== '') return path.resolve(settings.recurringFile)
   return path.join(os.homedir(), '.dsh', 'dsh-reminder-notify', 'recurring.json')
@@ -612,6 +655,8 @@ export function publicRecurring(job) {
     title: job.title,
     message: job.message,
     everyMinutes: job.everyMinutes,
+    days: Array.isArray(job.days) ? job.days : null,
+    daysLabel: daysLabelOf(job.days),
     remaining: job.remaining,
     nextAt: new Date(job.nextAt).toISOString(),
   }
@@ -629,8 +674,9 @@ export function createRecurring(settings, item, now = Date.now()) {
     sound: item.sound === false ? false : undefined,
     url: str(item.url, ''),
     everyMinutes,
+    days: Array.isArray(item.days) && item.days.length > 0 ? item.days : null,
     remaining: Math.max(0, Math.round(Number(item.times) || 0)),
-    nextAt: now + everyMinutes * 60000,
+    nextAt: nextRunWithDays(now, everyMinutes, item.days, now),
     createdAt: now,
   }
   const list = readRecurring(settings)
@@ -807,6 +853,7 @@ async function showItem(item) {
     replyEnabled: settings.replyEnabled,
     customButtons: customButtonsOf(settings, item),
     choices: choicesArgOf(item),
+    allowOther: item.allowOther === true,
     focusAssistMute: settings.focusAssistMute,
     snoozeMinutes: settings.snoozeMinutes,
     autoCompact: settings.compactOnFullscreen,
@@ -818,6 +865,7 @@ async function showItem(item) {
   let replyText = ''
   let buttonLabel = ''
   let choiceText = ''
+  let choiceOther = false
   let focusAssist = false
   try {
     const { exited } = await launch(settings.powershellPath, argv, PACKAGE_ROOT)
@@ -833,6 +881,7 @@ async function showItem(item) {
       if (typeof parsed.reply === 'string') replyText = parsed.reply.trim()
       if (typeof parsed.button === 'string') buttonLabel = parsed.button.trim()
       if (typeof parsed.choice === 'string') choiceText = parsed.choice.trim()
+      if (parsed.choiceOther === true) choiceOther = true
       if (parsed.focusAssist === true) focusAssist = true
       if (action === 'snooze') {
         const minutes = Math.round(clamp(num(parsed.snooze, settings.snoozeMinutes), 1, 240))
@@ -882,6 +931,7 @@ async function showItem(item) {
     ...(replyText !== '' ? { reply: replyText } : {}),
     ...(buttonLabel !== '' ? { button: buttonLabel } : {}),
     ...(choiceText !== '' ? { choice: choiceText } : {}),
+    ...(choiceOther ? { choiceOther: true } : {}),
     ...(focusAssist ? { focusAssist: true } : {}),
   })
   // 0.20：用户在卡上回话 → 记一条服务事件，并按开关推到手机（fire-and-forget）
@@ -891,6 +941,9 @@ async function showItem(item) {
       const pushed = pushOut(settings, `回复：${item.title}`, replyText, { kind: 'reply', time: new Date().toISOString() })
       if (pushed !== null && typeof pushed.catch === 'function') pushed.catch(() => {})
     }
+  }
+  if (action === 'replied' && choiceText !== '' && replyText !== '') {
+    emitServiceEvent('chosen', { kind: item.kind, title: item.title, choice: choiceText, other: replyText })
   }
   if (action === 'choice' && choiceText !== '') {
     emitServiceEvent('chosen', { kind: item.kind, title: item.title, choice: choiceText })
@@ -910,7 +963,7 @@ async function notify(kind, args, settings) {
   if (everyMinutes !== null) {
     return createRecurring(
       settings,
-      { kind, title: args.title, message: args.message, seconds: args.seconds, sound: args.sound, url: args.url, everyMinutes, times: args.times },
+      { kind, title: args.title, message: args.message, seconds: args.seconds, sound: args.sound, url: args.url, everyMinutes, times: args.times, days: parseDays(args.days) },
       Date.now(),
     )
   }
@@ -932,6 +985,28 @@ async function notify(kind, args, settings) {
   const sound = args.sound === false ? false : settings.sound && trayState.muted !== true
   const audio = audioNameOf(kind, settings)
   const speak = str(args.speak, settings.speakEnabled ? message : '')
+
+  if (settings[`mute${kind[0].toUpperCase()}${kind.slice(1)}`] === true) {
+    appendHistory(settings, {
+      at: Date.now(),
+      kind,
+      title,
+      message,
+      action: 'muted',
+      count: 1,
+      snoozed: false,
+      quiet: false,
+      muted: true,
+    })
+    return {
+      ok: true,
+      skipped: 'muted-kind',
+      kind,
+      title,
+      message,
+      detail: `配置里把「${kind}」这一类静音了，只记了历史`,
+    }
+  }
 
   if (settings.cardsEnabled === false) {
     return {
@@ -1058,6 +1133,7 @@ async function notify(kind, args, settings) {
     url: openUrl,
     buttons: Array.isArray(args.buttons) ? args.buttons.slice(0, 3) : undefined,
     options: normalizeChoices(args.options),
+    allowOther: args.allowOther === true,
     dueAt,
     priority: priorityOf(kind),
     sound: sound && audioPath !== '',
@@ -1162,6 +1238,14 @@ const parameters = {
       description:
         '决定卡上的候选按钮（2–4 个，每个最多 12 个字）。用户点了哪一个，就会记进历史并出现在你下一步的上下文里。只对 kind=decide 有意义。',
       items: { type: 'string' },
+    },
+    allowOther: {
+      type: 'boolean',
+      description: '在候选按钮后面再加一个「其他…」：用户点了可以自己打字回话，内容同样会进历史与上下文。',
+    },
+    days: {
+      type: 'string',
+      description: '周期提醒的星期规则：「weekdays」只在工作日、「weekend」只在周末、「1,3,5」指定星期（0=周日）。不传每天都行。',
     },
   },
 }
@@ -2500,7 +2584,7 @@ export function mobileViewOf(query = {}) {
 }
 
 export function mobileSettingsPatch(body) {
-  const allowed = ['sound', 'quietEnabled', 'pushEnabled', 'digestEnabled', 'toastEnabled']
+  const allowed = ['sound', 'quietEnabled', 'pushEnabled', 'digestEnabled', 'toastEnabled', 'muteDone', 'muteDecide', 'muteRaw']
   const values = body && typeof body === 'object' ? (body.values && typeof body.values === 'object' ? body.values : body) : {}
   const patch = {}
   for (const key of allowed) {
@@ -2660,6 +2744,9 @@ ${tab === 'home'
   <label class="row"><span>推送到手机</span><input type="checkbox" data-key="pushEnabled" ${settings.pushEnabled === true ? 'checked' : ''}></label>
   <label class="row"><span>每日日报</span><input type="checkbox" data-key="digestEnabled" ${settings.digestEnabled === true ? 'checked' : ''}></label>
   <label class="row"><span>系统通知气泡</span><input type="checkbox" data-key="toastEnabled" ${settings.toastEnabled === true ? 'checked' : ''}></label>
+  <label class="row"><span>「完成」卡不弹</span><input type="checkbox" data-key="muteDone" ${settings.muteDone === true ? 'checked' : ''}></label>
+  <label class="row"><span>「要你决定」卡不弹</span><input type="checkbox" data-key="muteDecide" ${settings.muteDecide === true ? 'checked' : ''}></label>
+  <label class="row"><span>「普通」卡不弹</span><input type="checkbox" data-key="muteRaw" ${settings.muteRaw === true ? 'checked' : ''}></label>
   <button type="button" id="saveSet">保存</button>
   <div id="setTip"></div>
 </div>
@@ -2690,6 +2777,24 @@ ${tab === 'home'
 <form id="f"><input id="m" maxlength="300" placeholder="回一句话给电脑上的模型"><button type="submit">发送</button></form>
 </div>
 <div id="tip"></div>
+<script>
+// 0.34：记住上次看的 tab 与筛选（同一台手机再打开直接回到原处）
+(function () {
+  try {
+    var q = new URLSearchParams(location.search);
+    if (!q.get('tab')) {
+      var tab = localStorage.getItem('drn-mobile-tab');
+      if (tab === 'history' || tab === 'settings') { q.set('tab', tab); }
+      var kind = localStorage.getItem('drn-mobile-kind');
+      if (kind && kind !== 'all') { q.set('kind', kind); }
+      if (q.toString() !== new URLSearchParams(location.search).toString()) { location.replace('${MOBILE_ROUTE}?' + q.toString()); return; }
+    } else {
+      localStorage.setItem('drn-mobile-tab', q.get('tab'));
+      if (q.get('kind')) localStorage.setItem('drn-mobile-kind', q.get('kind'));
+    }
+  } catch (e) {}
+})();
+</script>
 <script>
 // 局域网是 http，浏览器把这种页面当「不安全来源」：service worker 注册不了，
 // 安装提示（beforeinstallprompt）也不会触发。所以这里按 secure context 分别处理，
@@ -2848,7 +2953,12 @@ let choiceSeenAt = Date.now()
 
 export function unreadChoices(settings, since = 0, limit = 5) {
   return readHistory(settings)
-    .filter((entry) => entry.action === 'choice' && str(entry.choice, '') !== '' && Number(entry.at ?? 0) > since)
+    .filter(
+      (entry) =>
+        (entry.action === 'choice' || (entry.action === 'replied' && entry.choiceOther === true)) &&
+        str(entry.choice, '') !== '' &&
+        Number(entry.at ?? 0) > since,
+    )
     .slice(-limit)
 }
 
@@ -2860,7 +2970,8 @@ export function choicePromptText(settings, now = Date.now()) {
     const at = new Date(Number(entry.at ?? now))
     const hh = String(at.getHours()).padStart(2, '0')
     const mm = String(at.getMinutes()).padStart(2, '0')
-    return `- ${hh}:${mm} 「${str(entry.title, '')}」选了：${str(entry.choice, '')}`
+    const detail = entry.choiceOther === true && str(entry.reply, '') !== '' ? `其他：${str(entry.reply, '')}` : str(entry.choice, '')
+    return `- ${hh}:${mm} 「${str(entry.title, '')}」选了：${detail}`
   })
   return `用户在提醒卡上点了选项（${fresh.length} 条，按这个走就行，不用再确认）：\n${lines.join('\n')}`
 }

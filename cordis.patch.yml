@@ -136,6 +136,9 @@
         focusAssistMute: true
         # 卡片回话也按上面的推送地址发到手机
         # 总开关：关掉后不再弹出任何提醒卡片
+        muteDone: false
+        muteDecide: false
+        muteRaw: false
         cardsEnabled: true
         statsEnabled: true
         statsCacheMinutes: 10
