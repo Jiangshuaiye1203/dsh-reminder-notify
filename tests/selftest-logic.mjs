@@ -3,7 +3,7 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { mobileProxyPathOk, httpsLinkOf, mobileBarsOf, mobileCsvOf, mobileSettingsPatch, mobileViewOf, attachmentSummaryOf, mobileAttachmentsOf, uploadNameFor, condStateAfter, choicePromptText, choicesArgOf, normalizeChoices, resetChoiceSeen, unreadChoices, customButtonsOf, customButtonsSpec, escapeHtml, mobileLinkOf, mobilePageOf, phonePromptText, repliesOf, resetPhoneSeen, unreadPhoneReplies, digestDue, digestShownToday, digestMessage, doctorReport, evaluateConditions, historyStats, inQuietHours, nextRunAfter, parseClock, parseCustomButtons, parseEvery, pushPayload, quietEndAt, todayKey, toastArgsOf, feedbackEntryOf, issueUrlOf, envSummaryOf, statsOf, feedbackPathOf, backupNow, listBackups, readBackup, backupDirOf, parseDays, daysLabelOf, nextRunWithDays, resolvedHostMode, nativeNotifyArgs } from '../index.js'
+import { mobileProxyPathOk, httpsLinkOf, mobileBarsOf, mobileCsvOf, mobileSettingsPatch, mobileViewOf, attachmentSummaryOf, mobileAttachmentsOf, uploadNameFor, condStateAfter, choicePromptText, choicesArgOf, normalizeChoices, resetChoiceSeen, unreadChoices, customButtonsOf, customButtonsSpec, escapeHtml, mobileLinkOf, mobilePageOf, phonePromptText, repliesOf, resetPhoneSeen, unreadPhoneReplies, digestDue, digestShownToday, digestMessage, doctorReport, evaluateConditions, historyStats, inQuietHours, nextRunAfter, parseClock, parseCustomButtons, parseEvery, pushPayload, quietEndAt, todayKey, toastArgsOf, feedbackEntryOf, issueUrlOf, envSummaryOf, statsOf, feedbackPathOf, backupNow, listBackups, readBackup, backupDirOf, parseDays, daysLabelOf, nextRunWithDays, resolvedHostMode, nativeNotifyArgs, mobileAccessAllowed, manifestOf } from '../index.js'
 
 let failed = 0
 function check(label, actual, expected) {
@@ -444,4 +444,20 @@ if (failed > 0) {
   console.log(`\n${failed} 项失败`)
   process.exit(1)
 }
+console.log('\n全部通过')
+
+// —— 0.35.1 安全：手机入口 / 未读回话只对本机或带对口令的请求开放 ——
+const secSettings = { mobileToken: 'abc123' }
+check('本机 IPv4 放行', mobileAccessAllowed(secSettings, '127.0.0.1', ''), true)
+check('本机 IPv6 放行', mobileAccessAllowed(secSettings, '::1', ''), true)
+check('映射的 127.0.0.1 放行', mobileAccessAllowed(secSettings, '::ffff:127.0.0.1', ''), true)
+check('局域网无口令被拒', mobileAccessAllowed(secSettings, '192.168.1.50', ''), false)
+check('局域网口令错被拒', mobileAccessAllowed(secSettings, '192.168.1.50', 'nope'), false)
+check('局域网口令对放行', mobileAccessAllowed(secSettings, '192.168.1.50', 'abc123'), true)
+check('没设口令时局域网放行', mobileAccessAllowed({ mobileToken: '' }, '192.168.1.50', ''), true)
+check('清单不带口令时 start_url 干净', manifestOf(secSettings, false).start_url.includes('?t='), false)
+check('清单带口令时 start_url 有口令', manifestOf(secSettings, true).start_url.includes('?t=abc123'), true)
+check('清单图标仍是两张', manifestOf(secSettings, true).icons.length, 2)
+
+if (failed > 0) { console.log('\n' + failed + ' 项失败'); process.exit(1) }
 console.log('\n全部通过')

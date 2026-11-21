@@ -9,3 +9,5 @@ Adds a `notify_user` tool to DeepSeek Harness: a "done" card when a task finishe
 - 0.33: "Backup & restore" panel block (daily auto backup, export/import/restore) + one-command `scripts/release.ps1`.
 - 0.34: decide cards take an “other…” free-text answer, recurring reminders can be limited to weekdays/weekend/picked days, and each kind can be muted (desktop panel and mobile page).
 - 0.35: cross-platform — macOS uses osascript and Linux uses notify-send for native notifications (no card buttons, reply box or snooze); doctor gained a native-notifier check.
+
+- 0.35.1: the mobile entry and unread replies are only readable from the host machine or with the token; the manifest no longer leaks the token. Also fixed `hostMode=native` never running on macOS/Linux and recurring jobs ignoring the weekday filter after the first run.

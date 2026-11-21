@@ -986,8 +986,8 @@ async function showItem(item) {
 }
 
 async function notify(kind, args, settings) {
-  if (process.platform !== 'win32') {
-    return { ok: false, error: 'only-windows', detail: '桌面提醒只能在本机 Windows 上弹出' }
+  if (process.platform !== 'win32' && resolvedHostMode(settings) !== 'native') {
+    return { ok: false, error: 'only-windows', detail: '桌面提醒只能在本机 Windows 上弹出（或把 hostMode 设成 native 用系统通知）' }
   }
 
   const everyMinutes = parseEvery(args.every)
@@ -1457,7 +1457,7 @@ export function startHttpsProxy(ctx, getSettings) {
           res.end('only the mobile page is exposed here')
           return
         }
-        const upstream = http.request({ host: target.hostname, port: Number(target.port || 80), path: req.url ?? '/', method: req.method, headers: { ...req.headers, host: target.host } }, (up) => {
+        const upstream = http.request({ host: target.hostname, port: Number(target.port || 80), path: req.url ?? '/', method: req.method, headers: { ...req.headers, host: target.host, 'x-drn-proxy-remote': String(req.socket?.remoteAddress ?? '') } }, (up) => {
           res.writeHead(up.statusCode ?? 502, up.headers)
           up.pipe(res)
         })
@@ -3064,6 +3064,48 @@ export function resetChoiceSeen(now = Date.now()) {
   choiceSeenAt = now
 }
 
+function loopbackAddress(address) {
+  const text = str(address, '').trim().toLowerCase()
+  if (text === '::1' || text === 'localhost') return true
+  if (text.startsWith('::ffff:')) return loopbackAddress(text.slice(7))
+  return /^127\./.test(text)
+}
+
+/** 经过 1319 https 反代时，上游看到的 socket 是 127.0.0.1，所以代理会把真实来源塞进 x-drn-proxy-remote。 */
+export function remoteAddressOf(headers, socketAddress = '') {
+  const forwarded = str(headers?.['x-drn-proxy-remote'], '')
+  if (forwarded !== '') return forwarded
+  return str(socketAddress, '')
+}
+
+/** 只允许本机（面板）或不带口令但请求带对了 token 的调用读手机入口与未读回话。 */
+export function mobileAccessAllowed(settings, remoteAddress, provided) {
+  const token = str(settings?.mobileToken, '')
+  if (loopbackAddress(remoteAddress)) return true
+  if (token === '') return true
+  return String(provided ?? '') === token
+}
+
+/** 安装清单：只有请求本身带了口令时才把口令写进 start_url，避免局域网里谁都能拿到口令。 */
+export function manifestOf(settings, withToken) {
+  const token = str(settings?.mobileToken, '')
+  const start = token !== '' && withToken === true ? `${MOBILE_ROUTE}?t=${encodeURIComponent(token)}` : MOBILE_ROUTE
+  return {
+    name: '桌面提醒',
+    short_name: '提醒',
+    description: '看最近的提醒，并回一句话给电脑上的模型',
+    start_url: start,
+    scope: MOBILE_ROUTE,
+    display: 'standalone',
+    background_color: '#14181f',
+    theme_color: '#14181f',
+    icons: [
+      { src: `${MOBILE_ROUTE}/icon-192.png`, sizes: '192x192', type: 'image/png', purpose: 'any' },
+      { src: `${MOBILE_ROUTE}/icon-512.png`, sizes: '512x512', type: 'image/png', purpose: 'any' },
+    ],
+  }
+}
+
 function registerMobileAssets(ctx, getSettings) {
   const reply = (res, status, body, type = 'application/json; charset=utf-8') => {
     res.writeHead(status, { 'content-type': type, 'cache-control': 'no-store' })
@@ -3074,23 +3116,10 @@ function registerMobileAssets(ctx, getSettings) {
     path: `${MOBILE_ROUTE}/manifest.webmanifest`,
     handler: (req, res) => {
       const settings = getSettings()
-      const token = str(settings.mobileToken, '')
-      const start = token === '' ? MOBILE_ROUTE : `${MOBILE_ROUTE}?t=${encodeURIComponent(token)}`
-      const body = JSON.stringify({
-        name: '桌面提醒',
-        short_name: '提醒',
-        description: '看最近的提醒，并回一句话给电脑上的模型',
-        start_url: start,
-        scope: MOBILE_ROUTE,
-        display: 'standalone',
-        background_color: '#14181f',
-        theme_color: '#14181f',
-        icons: [
-          { src: `${MOBILE_ROUTE}/icon-192.png`, sizes: '192x192', type: 'image/png', purpose: 'any' },
-          { src: `${MOBILE_ROUTE}/icon-512.png`, sizes: '512x512', type: 'image/png', purpose: 'any' },
-        ],
-      })
-      return reply(res, 200, body, 'application/manifest+json; charset=utf-8')
+      const url = new URL(req.url ?? `${MOBILE_ROUTE}/manifest.webmanifest`, 'http://127.0.0.1')
+      const provided = url.searchParams.get('t')
+      const withToken = str(settings.mobileToken, '') !== '' && provided === str(settings.mobileToken, '')
+      return reply(res, 200, JSON.stringify(manifestOf(settings, withToken)), 'application/manifest+json; charset=utf-8')
     },
   }
   mountRoute(ctx, manifest, 'dsh-reminder-notify: mobile manifest')
@@ -3143,6 +3172,10 @@ self.addEventListener('fetch', (event) => {
     path: `${MOBILE_ROUTE}/inbox`,
     handler: async (req, res) => {
       const settings = getSettings()
+      const url = new URL(req.url ?? `${MOBILE_ROUTE}/inbox`, 'http://127.0.0.1')
+      if (!mobileAccessAllowed(settings, remoteAddressOf(req.headers, req.socket?.remoteAddress), url.searchParams.get('t'))) {
+        return reply(res, 401, JSON.stringify({ ok: false, error: 'token-required' }))
+      }
       if (req.method === 'POST') {
         resetPhoneSeen()
         return reply(res, 200, JSON.stringify({ ok: true, unread: 0 }))
@@ -3293,6 +3326,10 @@ function registerMobileRoute(ctx, getSettings) {
     path: `${MOBILE_ROUTE}/link`,
     handler: async (req, res) => {
       const settings = getSettings()
+      const linkUrl = new URL(req.url ?? `${MOBILE_ROUTE}/link`, 'http://127.0.0.1')
+      if (!mobileAccessAllowed(settings, remoteAddressOf(req.headers, req.socket?.remoteAddress), linkUrl.searchParams.get('t'))) {
+        return reply(res, 401, JSON.stringify({ ok: false, error: 'token-required', detail: '手机页面口令只能在本机读取' }))
+      }
       if (str(settings.mobileToken, '') === '') {
         // 第一次要链接时生成口令并写回配置，之后固定不变
         const token = Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 10)
@@ -4112,7 +4149,7 @@ function registerRecurringLoop(ctx, getSettings) {
         changed = true
         const remaining = job.remaining > 0 ? job.remaining - 1 : 0
         if (job.remaining > 0 && remaining <= 0) continue
-        keep.push({ ...job, remaining, nextAt: nextRunAfter(dueAt, job.everyMinutes, Date.now()) })
+        keep.push({ ...job, remaining, nextAt: Array.isArray(job.days) && job.days.length > 0 ? nextRunWithDays(dueAt, job.everyMinutes, job.days, Date.now()) : nextRunAfter(dueAt, job.everyMinutes, Date.now()) })
       }
       if (changed) writeRecurring(settings, keep)
     } catch {

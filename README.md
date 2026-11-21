@@ -258,6 +258,21 @@ CI 在 `.github/workflows/ci.yml`：Ubuntu 与 Windows 各跑 node 20/22，做�
 - 修了一个真 bug：插件把自己写回的内部状态（日报日期、余额基线、条件状态）只写进了配置，却没让运行中的 `getSettings()` 看到 —— 于是「今天还没发日报」永远成立，日报每分钟弹一次（今天弹了 175 次）。
 - 现在写回后立刻生效；启动时若历史里今天已有日报，直接补上日期，不会一装完就连弹。
 
+## 0.35.1 修的安全问题
+
+手机页原本只靠 `?t=<口令>` 把门，但有三条路绕过了它，同一 Wi-Fi 下谁都能试：
+
+- `GET /dsh-reminder-notify/mobile/inbox` 完全不校验口令 → 能读到你在手机上的回话原文；
+- `GET /dsh-reminder-notify/mobile/link` 不校验口令 → 直接把带口令的完整地址交出去；
+- `GET /dsh-reminder-notify/mobile/manifest.webmanifest` 把口令写进 `start_url` 且不校验 → 同样泄口令。
+
+现在改成：手机入口（`/mobile/link`）与未读回话（`/mobile/inbox`）只对本机、或带着正确口令的请求开放；
+安装清单只有在请求本身带对口令时才把口令写进 `start_url`。另外 1319 的 https 反代会把真实来源塞进
+`x-drn-proxy-remote`，所以从局域网走 https 的请求一样按真实 IP 判定，不会被当成 127.0.0.1。
+
+顺手修的：`hostMode=native` 在 macOS/Linux 上其实走不到（被前面一句 `only-windows` 提前返回），
+以及带 `days` 的周期提醒第二次之后会忽略「只在工作日」的限定。
+
 ## 0.35 起：macOS / Linux 也能用（走系统原生通知）
 
 - Windows 仍然用包内的 PowerShell 卡片宿主（脚本或老 exe）。
