@@ -440,6 +440,8 @@ check('未知平台返回 null', nativeNotifyArgs('aix', 't', 'm', 5), null)
 check('秒数夹到 2–600', nativeNotifyArgs('linux', 't', 'm', 0).seconds, 2)
 
 
+check('附件名里的 .. 被抹掉', sanitizeLabel('a..b').includes('..'), false)
+
 if (failed > 0) {
   console.log(`\n${failed} 项失败`)
   process.exit(1)

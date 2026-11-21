@@ -1404,6 +1404,7 @@ export function sanitizeLabel(text, max = 60) {
   out = out.replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]/g, ' ')
   out = out.replace(/[\\/<>|:"*?]/g, ' ')
   out = out.replace(/\s+/g, ' ').trim()
+  out = out.replace(/\.{2,}/g, ' ').replace(/\s+/g, ' ').trim()
   out = out.replace(/^\.+/, '').trim()
   const chars = Array.from(out)
   if (chars.length > max) out = chars.slice(0, max).join('').trim()
@@ -1520,7 +1521,7 @@ export function mobileAttachmentsOf(raw, dir = mobileUploadDir()) {
       continue
     }
     out.push({
-      name: sanitizeLabel(item?.name, 80) || path.basename(resolved),
+      name: sanitizeLabel(item?.name) || path.basename(resolved),
       file: resolved,
       type: str(item?.type, ''),
       size: Math.max(0, Math.round(size)),
