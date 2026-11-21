@@ -24,6 +24,11 @@ dsh plugin --profile desktop add link:<本目录绝对路径>
 - **周期提醒**：`notify_user(kind, message, every: "30m", times: 5)` 会登记一条周期任务（`30m` / `2h` / `1d`，1 分钟–7 天），到点自己弹卡；`times` 不传就一直重复。任务存在 `~/.dsh/dsh-reminder-notify/recurring.json`，`GET /dsh-reminder-notify/recurring` 能看列表，POST `{"action":"cancel","id":"…"}` 或 `{"action":"cancel-all"}` 可取消。
 - **历史图表**：面板「历史与统计」里多了一排 30 天柱状图（每天一根，鼠标停上去看日期和条数），一眼看出哪天提醒多。
 
+## 0.22 起多了什么
+
+- **手机页面能装到桌面了**：手机浏览器打开面板里那个地址，页面顶部会出现「安装到桌面」按钮（iOS 用 Safari 的「添加到主屏幕」），装完像个小 App 一样有图标、全屏打开，离线时也能看见上次的内容。
+- **手机回话会自己跑到模型眼前**：你在手机上回一句话，下一次模型开始干活时，提示词里会带上「用户刚从手机上回了话」和原文，不用你再复制一次；`GET /dsh-reminder-notify/mobile/inbox` 能看还有几条没被读走，`POST` 一下记成已读。
+
 ## 0.21 起多了什么
 
 - **手机页面（局域网）**：面板「高级：历史、余额与宿主」里会显示一个 `http://<内网IP>:<端口>/dsh-reminder-notify/mobile?t=…` 地址。

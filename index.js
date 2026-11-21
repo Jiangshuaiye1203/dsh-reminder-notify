@@ -2257,6 +2257,11 @@ export function mobilePageOf(settings, entries, now = new Date()) {
   return `<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#14181f">
+<link rel="manifest" href="${MOBILE_ROUTE}/manifest.webmanifest${str(settings.mobileToken, '') === '' ? '' : '?t=' + encodeURIComponent(str(settings.mobileToken, ''))}">
+<link rel="apple-touch-icon" href="${MOBILE_ROUTE}/icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="桌面提醒">
 <title>桌面提醒 · 手机版</title>
 <style>
 :root { color-scheme: dark; }
@@ -2276,10 +2281,12 @@ li { background: #1b212b; border-radius: 10px; padding: 10px 12px; margin-bottom
 form { display: flex; gap: 8px; position: sticky; bottom: 0; background: #14181f; padding-top: 8px; }
 input { flex: 1; padding: 11px 12px; border-radius: 10px; border: 1px solid #2b3442; background: #1b212b; color: #e6edf3; font-size: 15px; }
 button { padding: 11px 16px; border-radius: 10px; border: 0; background: #2f81f7; color: #fff; font-size: 15px; }
+.install { margin: 0 0 14px; width: 100%; padding: 11px 16px; border-radius: 10px; border: 1px solid #2b3442; background: #1b212b; color: #e6edf3; font-size: 15px; }
 #tip { color: #8b98a8; font-size: 12px; margin-top: 8px; min-height: 16px; }
 </style></head><body>
 <h1>桌面提醒 · 手机版</h1>
 <div class="sub">${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')} · 和电脑同一个 Wi-Fi 才能打开</div>
+<button id="install" class="install" hidden>安装到桌面</button>
 <div class="stats">
   <div class="stat"><b>${stats.today}</b><span>今天</span></div>
   <div class="stat"><b>${stats.total}</b><span>总共</span></div>
@@ -2289,6 +2296,23 @@ button { padding: 11px 16px; border-radius: 10px; border: 0; background: #2f81f7
 <form id="f"><input id="m" maxlength="300" placeholder="回一句话给电脑上的模型"><button type="submit">发送</button></form>
 <div id="tip"></div>
 <script>
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('${MOBILE_ROUTE}/sw.js', { scope: '${MOBILE_ROUTE}/' }).catch(() => {});
+}
+let installEvent = null;
+const installBtn = document.getElementById('install');
+window.addEventListener('beforeinstallprompt', (event) => {
+  event.preventDefault();
+  installEvent = event;
+  installBtn.hidden = false;
+});
+installBtn.addEventListener('click', async () => {
+  if (!installEvent) { installBtn.hidden = true; return; }
+  installEvent.prompt();
+  await installEvent.userChoice.catch(() => null);
+  installEvent = null;
+  installBtn.hidden = true;
+});
 const f = document.getElementById('f'); const m = document.getElementById('m'); const tip = document.getElementById('tip');
 f.addEventListener('submit', async (e) => {
   e.preventDefault(); const text = m.value.trim(); if (!text) return;
@@ -2301,6 +2325,123 @@ f.addEventListener('submit', async (e) => {
   } catch (err) { tip.textContent = '没发出去：' + err.message; }
 });
 </script></body></html>`
+}
+
+// 0.22：手机回话让模型自己看到。把「未读的手机回话」挂进系统提示词的 context，
+// 每次组装提示词时把新的几条读出来，读完就记成已读，不重复嘀咕。
+let phoneSeenAt = Date.now()
+
+export function unreadPhoneReplies(settings, since = 0, limit = 10) {
+  return readHistory(settings)
+    .filter((entry) => entry.action === 'replied' && str(entry.via, '') === 'mobile' && Number(entry.at ?? 0) > since)
+    .slice(-limit)
+}
+
+export function phonePromptText(settings, now = Date.now()) {
+  const fresh = unreadPhoneReplies(settings, phoneSeenAt)
+  if (fresh.length === 0) return ''
+  phoneSeenAt = now
+  const lines = fresh.map((entry) => {
+    const at = new Date(Number(entry.at ?? now))
+    const hh = String(at.getHours()).padStart(2, '0')
+    const mm = String(at.getMinutes()).padStart(2, '0')
+    return `- ${hh}:${mm} 手机回话：${str(entry.reply, '')}`
+  })
+  return `用户刚从手机上回了话（${fresh.length} 条，已经看过就不用再问）：\n${lines.join('\n')}`
+}
+
+export function resetPhoneSeen(now = Date.now()) {
+  phoneSeenAt = now
+}
+
+function registerMobileAssets(ctx, getSettings) {
+  const reply = (res, status, body, type = 'application/json; charset=utf-8') => {
+    res.writeHead(status, { 'content-type': type, 'cache-control': 'no-store' })
+    res.end(body)
+  }
+  const manifest = {
+    kind: 'exact',
+    path: `${MOBILE_ROUTE}/manifest.webmanifest`,
+    handler: (req, res) => {
+      const settings = getSettings()
+      const token = str(settings.mobileToken, '')
+      const start = token === '' ? MOBILE_ROUTE : `${MOBILE_ROUTE}?t=${encodeURIComponent(token)}`
+      const body = JSON.stringify({
+        name: '桌面提醒',
+        short_name: '提醒',
+        description: '看最近的提醒，并回一句话给电脑上的模型',
+        start_url: start,
+        scope: MOBILE_ROUTE,
+        display: 'standalone',
+        background_color: '#14181f',
+        theme_color: '#14181f',
+        icons: [
+          { src: `${MOBILE_ROUTE}/icon-192.png`, sizes: '192x192', type: 'image/png', purpose: 'any' },
+          { src: `${MOBILE_ROUTE}/icon-512.png`, sizes: '512x512', type: 'image/png', purpose: 'any' },
+        ],
+      })
+      return reply(res, 200, body, 'application/manifest+json; charset=utf-8')
+    },
+  }
+  mountRoute(ctx, manifest, 'dsh-reminder-notify: mobile manifest')
+
+  const sw = {
+    kind: 'exact',
+    path: `${MOBILE_ROUTE}/sw.js`,
+    handler: (req, res) => {
+      const body = `const CACHE = 'dsh-reminder-mobile-v1'
+self.addEventListener('install', () => self.skipWaiting())
+self.addEventListener('activate', (event) => event.waitUntil(self.clients.claim()))
+self.addEventListener('fetch', (event) => {
+  const request = event.request
+  if (request.method !== 'GET') return
+  event.respondWith(
+    fetch(request)
+      .then((response) => {
+        const copy = response.clone()
+        caches.open(CACHE).then((cache) => cache.put(request, copy)).catch(() => {})
+        return response
+      })
+      .catch(() => caches.match(request).then((hit) => hit || new Response('离线了，连回同一个 Wi-Fi 再打开。', { headers: { 'content-type': 'text/plain; charset=utf-8' } }))),
+  )
+})
+`
+      return reply(res, 200, body, 'text/javascript; charset=utf-8')
+    },
+  }
+  mountRoute(ctx, sw, 'dsh-reminder-notify: mobile service worker')
+
+  for (const size of [192, 512]) {
+    const icon = {
+      kind: 'exact',
+      path: `${MOBILE_ROUTE}/icon-${size}.png`,
+      handler: (req, res) => {
+        try {
+          const bytes = fs.readFileSync(path.join(PACKAGE_ROOT, 'assets', 'mobile', `icon-${size}.png`))
+          res.writeHead(200, { 'content-type': 'image/png', 'cache-control': 'public, max-age=86400' })
+          res.end(bytes)
+        } catch {
+          reply(res, 404, JSON.stringify({ ok: false, error: 'icon-missing' }))
+        }
+      },
+    }
+    mountRoute(ctx, icon, `dsh-reminder-notify: mobile icon ${size}`)
+  }
+
+  const inbox = {
+    kind: 'exact',
+    path: `${MOBILE_ROUTE}/inbox`,
+    handler: async (req, res) => {
+      const settings = getSettings()
+      if (req.method === 'POST') {
+        resetPhoneSeen()
+        return reply(res, 200, JSON.stringify({ ok: true, unread: 0 }))
+      }
+      const unread = unreadPhoneReplies(settings, phoneSeenAt)
+      return reply(res, 200, JSON.stringify({ ok: true, count: unread.length, replies: unread }))
+    },
+  }
+  mountRoute(ctx, inbox, 'dsh-reminder-notify: mobile inbox route')
 }
 
 function registerMobileRoute(ctx, getSettings) {
@@ -2922,6 +3063,19 @@ export function apply(ctx, config) {
   registerRecurringLoop(ctx, () => settingsOf(config))
   registerRepliesRoute(ctx, () => settingsOf(config))
   registerMobileRoute(ctx, () => settingsOf(config))
+  registerMobileAssets(ctx, () => settingsOf(config))
+  const promptService = typeof ctx.get === 'function' ? ctx.get('systemPrompt') : undefined
+  if (promptService !== undefined && typeof promptService.context === 'function') {
+    ctx.effect(
+      () =>
+        promptService.context({
+          name: 'dsh-reminder-notify:phone-replies',
+          order: 880,
+          text: () => phonePromptText(settingsOf(config)),
+        }),
+      'dsh-reminder-notify: phone replies prompt',
+    )
+  }
   registerDoctorRoute(ctx, () => settingsOf(config))
   const tools = typeof ctx.get === 'function' ? ctx.get('tools') : ctx.tools
   if (tools === undefined || tools === null || typeof tools.register !== 'function') {

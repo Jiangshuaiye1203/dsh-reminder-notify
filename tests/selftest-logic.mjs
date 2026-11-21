@@ -1,6 +1,9 @@
 // 纯逻辑自检：不弹窗口、不碰文件，只验证免打扰时段计算和历史统计。
 // 跑法：node tests/selftest-logic.mjs
-import { condStateAfter, customButtonsOf, customButtonsSpec, escapeHtml, mobileLinkOf, mobilePageOf, repliesOf, digestDue, digestMessage, doctorReport, evaluateConditions, historyStats, inQuietHours, nextRunAfter, parseClock, parseCustomButtons, parseEvery, pushPayload, quietEndAt, todayKey, toastArgsOf } from '../index.js'
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+import { condStateAfter, customButtonsOf, customButtonsSpec, escapeHtml, mobileLinkOf, mobilePageOf, phonePromptText, repliesOf, resetPhoneSeen, unreadPhoneReplies, digestDue, digestMessage, doctorReport, evaluateConditions, historyStats, inQuietHours, nextRunAfter, parseClock, parseCustomButtons, parseEvery, pushPayload, quietEndAt, todayKey, toastArgsOf } from '../index.js'
 
 let failed = 0
 function check(label, actual, expected) {
@@ -206,6 +209,31 @@ check('mobilePageOf 转义正文', page.includes('&lt;script&gt;alert(1)&lt;/scr
 check('mobilePageOf 不出原始 script 标签', page.includes('<script>alert(1)</script>'), false)
 check('mobilePageOf 显示回复', page.includes('回复：好的&lt;b&gt;'), true)
 check('mobilePageOf 统计今天条数', page.includes('<b>2</b><span>今天</span>'), true)
+
+// —— 手机回话进提示词（0.22）——
+const phoneHistory = path.join(os.tmpdir(), `drn-phone-test-${process.pid}.json`)
+const nowMs = Date.now()
+fs.writeFileSync(
+  phoneHistory,
+  JSON.stringify([
+    { at: nowMs - 60000, kind: 'raw', title: '完成', message: '', action: 'timeout' },
+    { at: nowMs - 30000, kind: 'raw', title: '手机回话', message: '', action: 'replied', reply: '收到了', via: 'mobile' },
+    { at: nowMs - 20000, kind: 'raw', title: '桌面回话', message: '', action: 'replied', reply: '桌面上说的', via: 'desktop' },
+  ]),
+)
+const phoneSettings = { historyFile: phoneHistory }
+resetPhoneSeen(0)
+check('unreadPhoneReplies 只算手机回话', unreadPhoneReplies(phoneSettings, 0).length, 1)
+resetPhoneSeen(0)
+const phonePrompt = phonePromptText(phoneSettings, nowMs + 1000)
+check('phonePromptText 带上回话原文', phonePrompt.includes('手机回话：收到了'), true)
+check('phonePromptText 不含桌面回话', phonePrompt.includes('桌面上说的'), false)
+check('phonePromptText 第二次为空', phonePromptText(phoneSettings, nowMs + 2000), '')
+resetPhoneSeen(nowMs + 3000)
+check('resetPhoneSeen 之后不再提醒', phonePromptText(phoneSettings, nowMs + 4000), '')
+try {
+  fs.unlinkSync(phoneHistory)
+} catch {}
 
 if (failed > 0) {
   console.log(`\n${failed} 项失败`)
