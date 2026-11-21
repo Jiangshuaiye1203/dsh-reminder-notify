@@ -19,3 +19,5 @@
 - 0.21 新增：手机页面。面板「高级：历史、余额与宿主」里有局域网地址（`mobileToken` 做口令），手机连同一个 Wi-Fi 打开就能看最近提醒并回一句话，回话进历史、也按 `pushReply` 推到手机；不走公网、不需要备案。
 
 - 0.22 新增：手机页面可「安装到桌面」（PWA：图标 + 全屏 + 离线缓存）；手机回话会自动出现在模型下一步的提示词里（读走即标记已读，`GET/POST /dsh-reminder-notify/mobile/inbox` 可查看与清空未读）。
+
+- 0.22.1 修正：手机页在内网 http 地址上不再假装能「安装到桌面」——http 给「添加到主屏幕」的手动说明（iPhone Safari 分享菜单 / Android Chrome 菜单），service worker 与离线缓存只在 https 或 localhost 下启用。

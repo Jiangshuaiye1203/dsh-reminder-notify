@@ -208,6 +208,8 @@ check('mobilePageOf 有回话入口', page.includes('/dsh-reminder-notify/mobile
 check('mobilePageOf 转义正文', page.includes('&lt;script&gt;alert(1)&lt;/script&gt;'), true)
 check('mobilePageOf 不出原始 script 标签', page.includes('<script>alert(1)</script>'), false)
 check('mobilePageOf 显示回复', page.includes('回复：好的&lt;b&gt;'), true)
+check('页面按安全上下文分支处理安装', page.includes('isSecureContext'), true)
+check('页面给 http 手动添加提示', page.includes('添加到主屏幕'), true)
 check('mobilePageOf 统计今天条数', page.includes('<b>2</b><span>今天</span>'), true)
 
 // —— 手机回话进提示词（0.22）——

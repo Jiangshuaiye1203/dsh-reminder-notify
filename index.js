@@ -2296,18 +2296,32 @@ button { padding: 11px 16px; border-radius: 10px; border: 0; background: #2f81f7
 <form id="f"><input id="m" maxlength="300" placeholder="回一句话给电脑上的模型"><button type="submit">发送</button></form>
 <div id="tip"></div>
 <script>
-if ('serviceWorker' in navigator) {
+// 局域网是 http，浏览器把这种页面当「不安全来源」：service worker 注册不了，
+// 安装提示（beforeinstallprompt）也不会触发。所以这里按 secure context 分别处理，
+// 不安全的地址上给一条手动添加到主屏幕的说明，而不是给一个点了没反应的按钮。
+const secureContext = window.isSecureContext === true;
+if (secureContext && 'serviceWorker' in navigator) {
   navigator.serviceWorker.register('${MOBILE_ROUTE}/sw.js', { scope: '${MOBILE_ROUTE}/' }).catch(() => {});
 }
 let installEvent = null;
 const installBtn = document.getElementById('install');
+if (!secureContext) {
+  installBtn.hidden = false;
+  installBtn.textContent = '添加到主屏幕';
+}
 window.addEventListener('beforeinstallprompt', (event) => {
   event.preventDefault();
   installEvent = event;
   installBtn.hidden = false;
+  installBtn.textContent = '安装到桌面';
 });
 installBtn.addEventListener('click', async () => {
-  if (!installEvent) { installBtn.hidden = true; return; }
+  const tipBox = document.getElementById('tip');
+  if (!installEvent) {
+    installBtn.hidden = true;
+    if (tipBox) tipBox.textContent = '这个地址是 http 内网地址：iPhone 用 Safari 的「分享 → 添加到主屏幕」，Android 用 Chrome 菜单里的「添加到主屏幕」。想让离线缓存也生效，得用 https 访问本机。';
+    return;
+  }
   installEvent.prompt();
   await installEvent.userChoice.catch(() => null);
   installEvent = null;
