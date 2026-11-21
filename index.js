@@ -46,6 +46,11 @@ export const Config = z === null ? undefined : z.object({
   seconds: z.number().min(2).max(600).step(1).default(60).description('弹窗停留秒数（2–600）').volatile(),
   position: z.union(['br', 'center', 'tr']).default('br').description('弹窗位置：br 右下、center 居中、tr 右上').volatile(),
   cardsEnabled: z.boolean().default(true).description('总开关：关掉后不再弹出任何提醒卡片（历史、日报推送照常）').volatile(),
+  statsEnabled: z.boolean().default(true).description('面板里显示本插件的 npm 下载量（来自 npm 公开统计）').volatile(),
+  statsCacheMinutes: z.number().min(1).max(1440).step(1).default(10).description('下载量缓存多少分钟，免得每次打开面板都去查').volatile(),
+  feedbackEnabled: z.boolean().default(true).description('面板里允许写反馈留言').volatile(),
+  feedbackFile: z.string().default('').description('留言保存的 JSONL 文件，留空用 ~/.dsh/dsh-reminder-notify/feedback.jsonl').volatile(),
+  feedbackRepo: z.string().default('Jiangshuaiye1203/dsh-reminder-notify').description('「在 GitHub 上提交」指向的仓库（owner/repo）').volatile(),
   sound: z.boolean().default(true).description('是否播放提示音').volatile(),
   doneAudio: z.string().default('完成提醒语音.wav').description('done 档位的提示音文件名（wav / mp3，在提示音目录下）').volatile(),
   decideAudio: z.string().default('需要你来决定.wav').description('decide 档位的提示音文件名（wav / mp3）').volatile(),
@@ -253,6 +258,11 @@ function settingsOf(config) {
     seconds: Math.round(clamp(num(c.seconds, 60), 2, 600)),
     position: POSITIONS.has(position) ? position : 'br',
     cardsEnabled: c.cardsEnabled !== false,
+    statsEnabled: c.statsEnabled !== false,
+    statsCacheMinutes: Math.round(clamp(num(c.statsCacheMinutes, 10), 1, 1440)),
+    feedbackEnabled: c.feedbackEnabled !== false,
+    feedbackFile: str(c.feedbackFile, ''),
+    feedbackRepo: str(c.feedbackRepo, 'Jiangshuaiye1203/dsh-reminder-notify'),
     sound: c.sound !== false,
     doneAudio: str(c.doneAudio, '完成提醒语音.wav'),
     decideAudio: str(c.decideAudio, '需要你来决定.wav'),
@@ -3098,6 +3108,213 @@ function registerMobileRoute(ctx, getSettings) {
   mountRoute(ctx, linkRoute, 'dsh-reminder-notify: mobile link route')
 }
 
+// 0.32：面板里的「本插件下载量」（npm 公开统计）与「反馈与留言」（本地 JSONL + 一键提交 issue）。
+const STATS_ROUTE = '/dsh-reminder-notify/stats'
+const FEEDBACK_ROUTE = '/dsh-reminder-notify/feedback'
+const NPM_PACKAGE = 'dsh-reminder-notify'
+const FEEDBACK_CATEGORIES = ['suggest', 'problem', 'experience']
+const FEEDBACK_CATEGORY_LABELS = { suggest: '建议', problem: '问题', experience: '体验' }
+let npmStatsCache = { at: 0, data: null }
+
+export function feedbackPathOf(settings) {
+  return settings.feedbackFile === '' ? path.join(os.homedir(), '.dsh', 'dsh-reminder-notify', 'feedback.jsonl') : settings.feedbackFile
+}
+
+export function feedbackEntryOf(body, now = Date.now()) {
+  const text = str(body?.text, '').trim().slice(0, 2000)
+  if (text === '') return null
+  const asked = str(body?.category, '')
+  const category = FEEDBACK_CATEGORIES.includes(asked) ? asked : 'suggest'
+  return { id: 'f' + now.toString(36) + Math.random().toString(36).slice(2, 7), at: now, category, text }
+}
+
+export function envSummaryOf(settings, entries, now = new Date()) {
+  const list = Array.isArray(entries) ? entries.slice(-3) : []
+  const recent = list.map((entry) => ({
+    at: new Date(Number(entry.at) || Number(now)).toISOString(),
+    kind: str(entry.kind, 'raw'),
+    action: str(entry.action, ''),
+  }))
+  return {
+    plugin: NPM_PACKAGE + ' ' + packageVersion(),
+    platform: process.platform + ' ' + os.release(),
+    node: process.version,
+    recent,
+  }
+}
+
+export function issueUrlOf(repo, entry, env) {
+  const owner = str(repo, '').replace(/^https?:\/\/github\.com\//, '').replace(/\.git$/, '').replace(/\/+$/, '')
+  if (!owner.includes('/') || entry === null || entry === undefined) return ''
+  const label = FEEDBACK_CATEGORY_LABELS[entry.category] || '建议'
+  const head = str(entry.text, '').split('\n')[0].slice(0, 40)
+  const lines = [str(entry.text, ''), '', '---', '插件：' + str(env?.plugin, ''), '系统：' + str(env?.platform, ''), 'Node：' + str(env?.node, '')]
+  const recent = Array.isArray(env?.recent) ? env.recent : []
+  if (recent.length > 0) {
+    lines.push('最近提醒：')
+    for (const item of recent) lines.push('- ' + str(item.at, '') + ' · ' + str(item.kind, '') + ' · ' + str(item.action, ''))
+  }
+  const title = '[反馈] ' + label + '：' + head
+  return 'https://github.com/' + owner + '/issues/new?title=' + encodeURIComponent(title) + '&body=' + encodeURIComponent(lines.join('\n'))
+}
+
+export function readFeedback(settings) {
+  try {
+    const raw = fs.readFileSync(feedbackPathOf(settings), 'utf8')
+    const out = []
+    for (const line of raw.split('\n')) {
+      const trimmed = line.trim()
+      if (trimmed === '') continue
+      try {
+        const parsed = JSON.parse(trimmed)
+        if (parsed !== null && typeof parsed === 'object') out.push(parsed)
+      } catch {
+        /* 坏行跳过 */
+      }
+    }
+    return out
+  } catch {
+    return []
+  }
+}
+
+function writeFeedbackAll(settings, list) {
+  try {
+    const file = feedbackPathOf(settings)
+    fs.mkdirSync(path.dirname(file), { recursive: true })
+    fs.writeFileSync(file, list.map((item) => JSON.stringify(item)).join('\n') + (list.length > 0 ? '\n' : ''))
+    return true
+  } catch {
+    return false
+  }
+}
+
+function appendFeedback(settings, entry) {
+  try {
+    const file = feedbackPathOf(settings)
+    fs.mkdirSync(path.dirname(file), { recursive: true })
+    fs.appendFileSync(file, JSON.stringify(entry) + '\n')
+    return true
+  } catch {
+    return false
+  }
+}
+
+export function statsOf(raw) {
+  const pick = (node) => Math.max(0, Math.round(Number(node && node.downloads) || 0))
+  const series = Array.isArray(raw?.series)
+    ? raw.series.filter((item) => item && typeof item.day === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(item.day)).map((item) => ({ day: item.day, downloads: pick(item) }))
+    : []
+  return { day: pick(raw?.lastDay), week: pick(raw?.lastWeek), month: pick(raw?.lastMonth), series }
+}
+
+async function fetchNpmStats(settings, force = false) {
+  const ttl = Math.max(1, Math.round(num(settings.statsCacheMinutes, 10))) * 60000
+  if (force !== true && npmStatsCache.data !== null && Date.now() - npmStatsCache.at < ttl) {
+    return { ...npmStatsCache.data, cached: true }
+  }
+  const base = 'https://api.npmjs.org/downloads'
+  const get = async (url) => {
+    const response = await fetch(url, { signal: AbortSignal.timeout(6000), headers: { accept: 'application/json' } })
+    if (!response.ok) throw new Error('http ' + response.status)
+    return await response.json()
+  }
+  try {
+    const [lastDay, lastWeek, lastMonth, range] = await Promise.all([
+      get(base + '/point/last-day/' + NPM_PACKAGE),
+      get(base + '/point/last-week/' + NPM_PACKAGE),
+      get(base + '/point/last-month/' + NPM_PACKAGE),
+      get(base + '/range/last-week/' + NPM_PACKAGE).catch(() => ({ downloads: [] })),
+    ])
+    const data = { package: NPM_PACKAGE, ...statsOf({ lastDay, lastWeek, lastMonth, series: range?.downloads }), at: new Date().toISOString() }
+    npmStatsCache = { at: Date.now(), data }
+    return { ...data, cached: false }
+  } catch (error) {
+    if (npmStatsCache.data !== null) return { ...npmStatsCache.data, cached: true, stale: true }
+    return { error: error instanceof Error ? error.message : String(error), at: new Date().toISOString() }
+  }
+}
+
+function registerStatsRoute(ctx, getSettings) {
+  const route = {
+    kind: 'exact',
+    path: STATS_ROUTE,
+    handler: async (req, res) => {
+      const settings = getSettings()
+      const reply = (status, payload) => {
+        res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+        res.end(JSON.stringify(payload))
+      }
+      if (settings.statsEnabled !== true) {
+        reply(200, { ok: true, enabled: false, package: NPM_PACKAGE })
+        return
+      }
+      const url = new URL(req.url ?? STATS_ROUTE, 'http://127.0.0.1')
+      const force = url.searchParams.get('refresh') === '1'
+      const stats = await fetchNpmStats(settings, force)
+      reply(200, { ok: true, enabled: true, package: NPM_PACKAGE, stats })
+    },
+  }
+  mountRoute(ctx, route, 'dsh-reminder-notify: stats route')
+}
+
+function registerFeedbackRoute(ctx, getSettings) {
+  const route = {
+    kind: 'exact',
+    path: FEEDBACK_ROUTE,
+    handler: async (req, res) => {
+      const settings = getSettings()
+      const reply = (status, payload) => {
+        res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+        res.end(JSON.stringify(payload))
+      }
+      const listOf = () => readFeedback(settings).slice(-20).reverse()
+      if (settings.feedbackEnabled !== true) {
+        reply(200, { ok: true, enabled: false, count: 0, entries: [] })
+        return
+      }
+      if (req.method === 'GET') {
+        const entries = listOf()
+        reply(200, { ok: true, enabled: true, file: feedbackPathOf(settings), count: entries.length, entries })
+        return
+      }
+      if (req.method !== 'POST') {
+        reply(405, { ok: false, error: 'method-not-allowed' })
+        return
+      }
+      const body = await readJsonBody(req)
+      if (body?.action === 'clear') {
+        writeFeedbackAll(settings, [])
+        reply(200, { ok: true, action: 'clear', count: 0, entries: [] })
+        return
+      }
+      if (body?.action === 'delete') {
+        const id = str(body?.id, '')
+        const left = readFeedback(settings).filter((item) => item.id !== id)
+        writeFeedbackAll(settings, left)
+        const entries = left.slice(-20).reverse()
+        reply(200, { ok: true, action: 'delete', count: entries.length, entries })
+        return
+      }
+      const entry = feedbackEntryOf(body, Date.now())
+      if (entry === null) {
+        reply(400, { ok: false, error: 'empty-text' })
+        return
+      }
+      if (appendFeedback(settings, entry) !== true) {
+        reply(500, { ok: false, error: 'write-failed', file: feedbackPathOf(settings) })
+        return
+      }
+      let issueUrl = ''
+      if (body?.env === true) {
+        issueUrl = issueUrlOf(settings.feedbackRepo, entry, envSummaryOf(settings, readHistory(settings), new Date()))
+      }
+      reply(200, { ok: true, entry, issueUrl, count: readFeedback(settings).length })
+    },
+  }
+  mountRoute(ctx, route, 'dsh-reminder-notify: feedback route')
+}
+
 function registerRepliesRoute(ctx, getSettings) {
   const reply = (res, status, payload) => {
     res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
@@ -3651,6 +3868,8 @@ export function apply(ctx, config) {
   registerRepliesRoute(ctx, () => settingsOf(config))
   registerMobileRoute(ctx, () => settingsOf(config))
   registerMobileAssets(ctx, () => settingsOf(config))
+  registerStatsRoute(ctx, () => settingsOf(config))
+  registerFeedbackRoute(ctx, () => settingsOf(config))
   {
     let proxy = null
     const ensureHttps = () => {

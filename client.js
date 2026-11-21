@@ -27,6 +27,8 @@ window.__ModuleLoader__.load({
     const DOCTOR_ROUTE = '/dsh-reminder-notify/doctor'
     const TRAY_ROUTE = '/dsh-reminder-notify/tray'
 const EXPORT_ROUTE = '/dsh-reminder-notify/export'
+const STATS_ROUTE = '/dsh-reminder-notify/stats'
+const FEEDBACK_ROUTE = '/dsh-reminder-notify/feedback'
     const DIGEST_ROUTE = '/dsh-reminder-notify/digest'
     // 下拉按扩展名分组：wav 一组、mp3 一组……组内按文件名排序，一眼能看出格式。
     function groupAudioFiles(files) {
@@ -447,6 +449,35 @@ const EXPORT_ROUTE = '/dsh-reminder-notify/export'
       historyActionQuietSkip: '免打扰跳过',
       historyChart: '最近 30 天',
       historyChartHint: '每根柱子一天，越长说明那天弹得越多；鼠标停住看日期与条数。',
+      groupStats: '本插件下载量',
+      statsHint: '数据来自 npm 公开统计：安装、升级都会计一次，不等于人数；走 npm 的安装才算。',
+      statsYesterday: '昨天',
+      statsWeek: '近 7 天',
+      statsMonth: '近 30 天',
+      statsUpdated: '数据时间',
+      statsCached: '缓存',
+      statsRefresh: '刷新',
+      statsLoading: '读取中…',
+      statsFailed: '没读到下载量：',
+      groupFeedback: '反馈与留言',
+      feedbackHint: '写建议、问题或体验。保存只留在本机；想让我看到就点「在 GitHub 上提交」。',
+      feedbackPlaceholder: '比如：卡片停留时间想再长一点 / 希望支持某种用法 …',
+      feedbackCategorySuggest: '建议',
+      feedbackCategoryProblem: '问题',
+      feedbackCategoryExperience: '体验',
+      feedbackAttachEnv: '附上环境信息（版本、系统、最近 3 条提醒的档位与处理方式，不含正文）',
+      feedbackSave: '保存到本地',
+      feedbackCopy: '复制',
+      feedbackIssue: '在 GitHub 上提交',
+      feedbackIssueTip: '浏览器没自动打开？手动点这里：',
+      feedbackNone: '还没有留言。',
+      feedbackDelete: '删除',
+      feedbackSaved: '已存到本机留言板。',
+      feedbackCopied: '已复制到剪贴板。',
+      feedbackCopyFailed: '复制失败，请手动选中文本。',
+      feedbackEmpty: '先写点什么。',
+      feedbackIssueOpened: '已打开 GitHub 新建 issue 页面，确认后发布。',
+      feedbackFailed: '保存失败：',
       recurringTitle: '周期提醒',
       recurringNone: '现在没有周期提醒。让模型用 every: "30m" 发一条就能建。',
       recurringNext: '下次',
@@ -668,6 +699,35 @@ const EXPORT_ROUTE = '/dsh-reminder-notify/export'
       historyActionQuietSkip: 'skipped (quiet hours)',
       historyChart: 'Last 30 days',
       historyChartHint: 'One bar per day; taller means more reminders. Hover for the date and count.',
+      groupStats: 'This plugin\'s downloads',
+      statsHint: 'From public npm stats: installs and upgrades both count, so this is downloads, not people.',
+      statsYesterday: 'Yesterday',
+      statsWeek: 'Last 7 days',
+      statsMonth: 'Last 30 days',
+      statsUpdated: 'Updated',
+      statsCached: 'cached',
+      statsRefresh: 'Refresh',
+      statsLoading: 'Loading…',
+      statsFailed: 'Could not read downloads: ',
+      groupFeedback: 'Feedback',
+      feedbackHint: 'Write a suggestion, a problem or your experience. Saving keeps it on this machine; use “Submit on GitHub” if you want me to see it.',
+      feedbackPlaceholder: 'e.g. cards could stay a bit longer / I wish it supported …',
+      feedbackCategorySuggest: 'Suggestion',
+      feedbackCategoryProblem: 'Problem',
+      feedbackCategoryExperience: 'Experience',
+      feedbackAttachEnv: 'Attach environment (version, OS, kind+action of the last 3 reminders; no message text)',
+      feedbackSave: 'Save locally',
+      feedbackCopy: 'Copy',
+      feedbackIssue: 'Submit on GitHub',
+      feedbackIssueTip: 'Browser did not open? Click here: ',
+      feedbackNone: 'No notes yet.',
+      feedbackDelete: 'Delete',
+      feedbackSaved: 'Saved to the local feedback board.',
+      feedbackCopied: 'Copied to clipboard.',
+      feedbackCopyFailed: 'Copy failed, please select the text manually.',
+      feedbackEmpty: 'Write something first.',
+      feedbackIssueOpened: 'Opened a GitHub new-issue page — submit it there.',
+      feedbackFailed: 'Save failed: ',
       recurringTitle: 'Recurring reminders',
       recurringNone: 'No recurring reminders. Ask the model to send one with every: "30m".',
       recurringNext: 'next',
@@ -714,6 +774,7 @@ const EXPORT_ROUTE = '/dsh-reminder-notify/export'
 .drn-hints-off .drn-field-hint { display: none; }
 .drn-hints-btn { margin-left: auto; }
 .drn-bars { display: flex; align-items: flex-end; gap: 2px; height: 56px; margin: 6px 0 2px; }
+.drn-feedback-text { width: 100%; box-sizing: border-box; font: inherit; font-size: 13px; line-height: 1.5; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--dsw-alias-border-l1); background: var(--dsw-alias-bg-base); color: var(--dsw-alias-label-primary); resize: vertical; }
 .drn-bar { flex: 1 1 0; min-height: 2px; background: var(--dsw-alias-brand-primary, #3b82f6); opacity: .85; border-radius: 2px; }
 .drn-control { flex: 0 1 260px; display: flex; justify-content: flex-end; }
 .drn-input, .drn-select { width: 100%; box-sizing: border-box; font: inherit; font-size: 13px; padding: 6px 8px; border-radius: 7px; border: 1px solid var(--dsw-alias-border-l1); background: var(--dsw-alias-bg-base); color: var(--dsw-alias-label-primary); }
@@ -912,6 +973,8 @@ const EXPORT_ROUTE = '/dsh-reminder-notify/export'
       { id: 'queue', label: 'groupQueue', groups: ['queue'] },
       { id: 'cond', label: 'groupCond', groups: ['cond'] },
       { id: 'misc', label: 'groupAdvanced', groups: ['digest', 'history', 'balance', 'host'] },
+      { id: 'stats', label: 'groupStats', groups: [] },
+      { id: 'feedback', label: 'groupFeedback', groups: [] },
       { id: 'help', label: 'groupHelp', groups: [] },
       { id: 'doctor', label: 'groupDoctor', groups: [] },
     ]
@@ -978,6 +1041,14 @@ const EXPORT_ROUTE = '/dsh-reminder-notify/export'
       const [doctor, setDoctor] = React.useState(null)
       const [tray, setTray] = React.useState(null)
       const [doctorBusy, setDoctorBusy] = React.useState(false)
+      const [stats, setStats] = React.useState(null)
+      const [statsBusy, setStatsBusy] = React.useState(false)
+      const [feedbackText, setFeedbackText] = React.useState('')
+      const [feedbackCategory, setFeedbackCategory] = React.useState('suggest')
+      const [feedbackAttach, setFeedbackAttach] = React.useState(true)
+      const [feedbackList, setFeedbackList] = React.useState([])
+      const [feedbackBusy, setFeedbackBusy] = React.useState(false)
+      const [feedbackIssue, setFeedbackIssue] = React.useState('')
 
       React.useEffect(() => {
         if (typeof fetch !== 'function') {
@@ -1042,6 +1113,8 @@ const EXPORT_ROUTE = '/dsh-reminder-notify/export'
         refreshMobile()
         refreshTray()
         refreshDigest()
+        refreshStats()
+        refreshFeedback()
       }, [])
 
       if (props.view === 'summary') {
@@ -1971,9 +2044,210 @@ const EXPORT_ROUTE = '/dsh-reminder-notify/export'
         }
       }
 
+      // 0.32：本插件下载量（npm 公开统计）
+      async function refreshStats(force) {
+        setStatsBusy(true)
+        try {
+          const res = await fetch(STATS_ROUTE + (force === true ? '?refresh=1' : ''))
+          const data = await res.json()
+          if (data && data.stats) setStats(data.stats)
+          else setStats({ error: (data && data.error) || 'unavailable' })
+        } catch (error) {
+          setStats({ error: String((error && error.message) || error) })
+        } finally {
+          setStatsBusy(false)
+        }
+      }
+
+      function statsBlock() {
+        const value = stats || {}
+        const series = Array.isArray(value.series) ? value.series : []
+        const max = series.reduce((top, item) => Math.max(top, Number(item && item.downloads) || 0), 0)
+        const bars = series.map((item, index) => {
+          const count = Number(item && item.downloads) || 0
+          const height = max > 0 ? Math.round((count / max) * 100) : 0
+          return h('span', {
+            key: 'ns' + index,
+            className: 'drn-bar',
+            title: String((item && item.day) || '') + ' · ' + count,
+            style: { height: Math.max(height, count > 0 ? 8 : 2) + '%' },
+          })
+        })
+        return [
+          h(
+            'div',
+            { className: 'drn-help', key: 'stats-panel' },
+            h('div', { className: 'drn-head-intro' }, label('statsHint')),
+            value.error
+              ? h('div', { className: 'drn-hint' }, label('statsFailed') + ' ' + String(value.error))
+              : h(
+                  'div',
+                  { className: 'drn-hint' },
+                  label('statsYesterday') + ' ' + String(value.day === undefined ? '—' : value.day) + ' · ' +
+                    label('statsWeek') + ' ' + String(value.week === undefined ? '—' : value.week) + ' · ' +
+                    label('statsMonth') + ' ' + String(value.month === undefined ? '—' : value.month),
+                ),
+            series.length > 0 ? h('div', { className: 'drn-bars' }, bars) : null,
+            h(
+              'div',
+              { className: 'drn-hint' },
+              label('statsUpdated') + ' ' + (value.at ? shortTime(Date.parse(value.at)) : '—') + (value.cached ? ' · ' + label('statsCached') : ''),
+            ),
+            h(
+              'div',
+              { className: 'drn-pick' },
+              h(
+                'button',
+                { type: 'button', className: 'drn-btn drn-digest-btn', disabled: statsBusy, onClick: () => refreshStats(true) },
+                label(statsBusy ? 'statsLoading' : 'statsRefresh'),
+              ),
+            ),
+          ),
+        ]
+      }
+
+      // 0.32：反馈与留言（本地 JSONL + 一键提交 issue）
+      function feedbackCategoryLabel(category) {
+        const key = category === 'problem' ? 'feedbackCategoryProblem' : category === 'experience' ? 'feedbackCategoryExperience' : 'feedbackCategorySuggest'
+        return label(key)
+      }
+
+      async function refreshFeedback() {
+        try {
+          const res = await fetch(FEEDBACK_ROUTE)
+          const data = await res.json()
+          if (data && Array.isArray(data.entries)) setFeedbackList(data.entries)
+        } catch {
+          /* 读不到就留着上一次 */
+        }
+      }
+
+      async function deleteFeedback(id) {
+        try {
+          const res = await fetch(FEEDBACK_ROUTE, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ action: 'delete', id }),
+          })
+          const data = await res.json()
+          if (data && Array.isArray(data.entries)) setFeedbackList(data.entries)
+        } catch (error) {
+          setMessage({ kind: 'error', text: label('feedbackFailed') + ' ' + String((error && error.message) || error) })
+        }
+      }
+
+      async function saveFeedback(action) {
+        const text = String(feedbackText || '').trim()
+        if (text === '') {
+          setMessage({ kind: 'error', text: label('feedbackEmpty') })
+          return
+        }
+        if (action === 'copy') {
+          try {
+            if (navigator.clipboard && navigator.clipboard.writeText) await navigator.clipboard.writeText(text)
+            setMessage({ kind: 'ok', text: label('feedbackCopied') })
+          } catch {
+            setMessage({ kind: 'error', text: label('feedbackCopyFailed') })
+          }
+          return
+        }
+        setFeedbackBusy(true)
+        try {
+          const res = await fetch(FEEDBACK_ROUTE, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ text, category: feedbackCategory, env: feedbackAttach === true }),
+          })
+          const data = await res.json()
+          if (!data || data.ok !== true) throw new Error((data && data.error) || 'failed')
+          setFeedbackList((current) => [data.entry].concat(Array.isArray(current) ? current : []).slice(0, 20))
+          setFeedbackText('')
+          if (action === 'issue' && data.issueUrl) {
+            setFeedbackIssue(data.issueUrl)
+            try {
+              window.open(data.issueUrl, '_blank', 'noopener')
+            } catch {
+              /* 弹窗被拦就用下面那条链接 */
+            }
+            setMessage({ kind: 'ok', text: label('feedbackIssueOpened') })
+          } else {
+            setMessage({ kind: 'ok', text: label('feedbackSaved') })
+          }
+        } catch (error) {
+          setMessage({ kind: 'error', text: label('feedbackFailed') + ' ' + String((error && error.message) || error) })
+        } finally {
+          setFeedbackBusy(false)
+        }
+      }
+
+      function feedbackBlock() {
+        const list = Array.isArray(feedbackList) ? feedbackList : []
+        return [
+          h(
+            'div',
+            { className: 'drn-help', key: 'feedback-panel' },
+            h('div', { className: 'drn-head-intro' }, label('feedbackHint')),
+            h('textarea', {
+              className: 'drn-feedback-text',
+              rows: 4,
+              maxLength: 2000,
+              value: feedbackText,
+              placeholder: label('feedbackPlaceholder'),
+              onChange: (event) => setFeedbackText(event.currentTarget.value),
+            }),
+            h(
+              'div',
+              { className: 'drn-pick' },
+              h(
+                'select',
+                { className: 'drn-select', style: { maxWidth: '160px' }, value: feedbackCategory, onChange: (event) => setFeedbackCategory(event.currentTarget.value) },
+                h('option', { value: 'suggest' }, label('feedbackCategorySuggest')),
+                h('option', { value: 'problem' }, label('feedbackCategoryProblem')),
+                h('option', { value: 'experience' }, label('feedbackCategoryExperience')),
+              ),
+              h(
+                'label',
+                { className: 'drn-hint' },
+                h('input', { type: 'checkbox', checked: feedbackAttach, onChange: (event) => setFeedbackAttach(event.currentTarget.checked) }),
+                ' ' + label('feedbackAttachEnv'),
+              ),
+            ),
+            h(
+              'div',
+              { className: 'drn-pick' },
+              h('button', { type: 'button', className: 'drn-btn drn-digest-btn', disabled: feedbackBusy, onClick: () => saveFeedback('save') }, label('feedbackSave')),
+              h('button', { type: 'button', className: 'drn-btn drn-digest-btn', disabled: feedbackBusy, onClick: () => saveFeedback('copy') }, label('feedbackCopy')),
+              h('button', { type: 'button', className: 'drn-btn drn-digest-btn', disabled: feedbackBusy, onClick: () => saveFeedback('issue') }, label('feedbackIssue')),
+            ),
+            feedbackIssue === ''
+              ? null
+              : h(
+                  'div',
+                  { className: 'drn-hint' },
+                  label('feedbackIssueTip'),
+                  h('a', { href: feedbackIssue, target: '_blank', rel: 'noreferrer' }, feedbackIssue.slice(0, 80) + '…'),
+                ),
+            list.length === 0
+              ? h('div', { className: 'drn-hint' }, label('feedbackNone'))
+              : h(
+                  'div',
+                  { className: 'drn-help' },
+                  list.slice(0, 5).map((entry) =>
+                    h(
+                      'div',
+                      { className: 'drn-hint', key: String(entry && entry.id) },
+                      shortTime(entry && entry.at) + ' · ' + feedbackCategoryLabel(entry && entry.category) + ' · ' + String((entry && entry.text) || '').slice(0, 60) + ' ',
+                      h('button', { type: 'button', className: 'drn-btn drn-digest-btn', onClick: () => deleteFeedback(entry && entry.id) }, label('feedbackDelete')),
+                    ),
+                  ),
+                ),
+          ),
+        ]
+      }
+
       const advanced = ADV_BLOCKS.map((block) => {
         const open = openBlocks[block.id] === true
-        const children = block.id === 'doctor'
+        const children = block.id === 'stats' ? statsBlock() : block.id === 'feedback' ? feedbackBlock() : block.id === 'doctor'
           ? [
               h(
                 'div',

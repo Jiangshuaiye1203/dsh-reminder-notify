@@ -3,7 +3,7 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { mobileProxyPathOk, httpsLinkOf, mobileBarsOf, mobileCsvOf, mobileSettingsPatch, mobileViewOf, attachmentSummaryOf, mobileAttachmentsOf, uploadNameFor, condStateAfter, choicePromptText, choicesArgOf, normalizeChoices, resetChoiceSeen, unreadChoices, customButtonsOf, customButtonsSpec, escapeHtml, mobileLinkOf, mobilePageOf, phonePromptText, repliesOf, resetPhoneSeen, unreadPhoneReplies, digestDue, digestShownToday, digestMessage, doctorReport, evaluateConditions, historyStats, inQuietHours, nextRunAfter, parseClock, parseCustomButtons, parseEvery, pushPayload, quietEndAt, todayKey, toastArgsOf } from '../index.js'
+import { mobileProxyPathOk, httpsLinkOf, mobileBarsOf, mobileCsvOf, mobileSettingsPatch, mobileViewOf, attachmentSummaryOf, mobileAttachmentsOf, uploadNameFor, condStateAfter, choicePromptText, choicesArgOf, normalizeChoices, resetChoiceSeen, unreadChoices, customButtonsOf, customButtonsSpec, escapeHtml, mobileLinkOf, mobilePageOf, phonePromptText, repliesOf, resetPhoneSeen, unreadPhoneReplies, digestDue, digestShownToday, digestMessage, doctorReport, evaluateConditions, historyStats, inQuietHours, nextRunAfter, parseClock, parseCustomButtons, parseEvery, pushPayload, quietEndAt, todayKey, toastArgsOf, feedbackEntryOf, issueUrlOf, envSummaryOf, statsOf, feedbackPathOf } from '../index.js'
 
 let failed = 0
 function check(label, actual, expected) {
@@ -350,6 +350,29 @@ check('mobileProxyPathOk 拦住根路径', mobileProxyPathOk('/'), false)
 const httpsSample = httpsLinkOf({ httpsPort: 1319, mobileToken: 'abc123' }, '', { address: '192.168.1.36' })
 check('httpsLinkOf 地址与端口', httpsSample, 'https://192.168.1.36:1319/dsh-reminder-notify/mobile?t=abc123')
 check('httpsLinkOf 端口夹在合法区间', httpsLinkOf({ httpsPort: 80, mobileToken: 'x' }, '', { address: '10.0.0.2' }).startsWith('https://10.0.0.2:1024/'), true)
+
+// 0.32：下载量统计与反馈留言
+const statsSample = statsOf({ lastDay: { downloads: 1117 }, lastWeek: { downloads: 3143 }, lastMonth: { downloads: 3143 }, series: [{ day: '2026-11-20', downloads: 1117 }, { day: '2026-11-19', downloads: 0 }, { day: 'bad', downloads: 5 }] })
+check('statsOf 三个窗口', [statsSample.day, statsSample.week, statsSample.month], [1117, 3143, 3143])
+check('statsOf 过滤坏日期', statsSample.series.length, 2)
+check('statsOf 空输入不炸', statsOf({}).week, 0)
+
+const feed = feedbackEntryOf({ text: '  卡片停留时间想长一点  ', category: 'problem' }, 1795200000000)
+check('feedbackEntryOf 去空白与类型', [feed.text, feed.category], ['卡片停留时间想长一点', 'problem'])
+check('feedbackEntryOf 非法类型回落建议', feedbackEntryOf({ text: 'x', category: 'nope' }, 1).category, 'suggest')
+check('feedbackEntryOf 空文本返回 null', feedbackEntryOf({ text: '   ' }, 1), null)
+check('feedbackPathOf 默认在用户目录', feedbackPathOf({ feedbackFile: '' }).endsWith('feedback.jsonl'), true)
+check('feedbackPathOf 尊重自定义路径', feedbackPathOf({ feedbackFile: 'C:/tmp/a.jsonl' }), 'C:/tmp/a.jsonl')
+
+const envSample = envSummaryOf({}, [{ at: 1795200000000, kind: 'done', action: 'ok', message: '不该出现', reply: '也不该' }], new Date(1795200000000))
+check('envSummaryOf 只留档位与处理方式', Object.keys(envSample.recent[0]).sort(), ['action', 'at', 'kind'])
+check('envSummaryOf 带版本', envSample.plugin.startsWith('dsh-reminder-notify '), true)
+
+const issue = issueUrlOf('Jiangshuaiye1203/dsh-reminder-notify', feed, envSample)
+check('issueUrlOf 指向 issues/new', issue.startsWith('https://github.com/Jiangshuaiye1203/dsh-reminder-notify/issues/new?title='), true)
+check('issueUrlOf 带正文编码', issue.includes(encodeURIComponent(feed.text)), true)
+check('issueUrlOf 剥掉 https 前缀', issueUrlOf('https://github.com/a/b.git', feed, envSample).startsWith('https://github.com/a/b/issues/new'), true)
+check('issueUrlOf 仓库非法返回空', issueUrlOf('nope', feed, envSample), '')
 
 
 if (failed > 0) {
