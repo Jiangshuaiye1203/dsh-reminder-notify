@@ -52,6 +52,7 @@
         buttonsEnabled: true
         # 点「稍后提醒」后隔多久再弹（分钟）
         snoozeMinutes: 10
+        pickShortMinutes: 60
         # 多条提醒排队显示，不同时叠在屏幕上
         queueEnabled: true
         # 队列最多保留几条，超出的丢最旧的

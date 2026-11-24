@@ -95,6 +95,7 @@ export const Config = z === null ? undefined : z.object({
   speakEnabled: z.boolean().default(false).description('弹卡时用系统语音把正文念出来（默认关，避免连环打扰）').volatile(),
   buttonsEnabled: z.boolean().default(true).description('卡片上显示「知道了 / 稍后提醒」两个按钮').volatile(),
   snoozeMinutes: z.number().min(1).max(240).step(1).default(10).description('点「稍后提醒」后多少分钟再弹（1–240）').volatile(),
+  pickShortMinutes: z.number().min(1).max(1440).step(1).default(60).description('短延迟阈值：不超过它的时间选项并进「稍后提醒」，不再单独占按钮（1–1440）').volatile(),
   queueEnabled: z.boolean().default(true).description('同一时刻只显示一张卡，其余排队，避免叠成一堆').volatile(),
   queueMax: z.number().min(1).max(20).step(1).default(5).description('最多同时排几条（1–20），超出丢弃最旧的').volatile(),
   mergeWindowMs: z.number().min(0).max(60000).step(500).default(3000).description('同档位提醒在这个窗口内合并成一条（毫秒，0 = 不合并）').volatile(),
@@ -315,6 +316,7 @@ function settingsOf(config) {
     speakEnabled: c.speakEnabled === true,
     buttonsEnabled: c.buttonsEnabled !== false,
     snoozeMinutes: Math.round(clamp(num(c.snoozeMinutes, 10), 1, 240)),
+    pickShortMinutes: Math.round(clamp(num(c.pickShortMinutes, 60), 1, 1440)),
     queueEnabled: c.queueEnabled !== false,
     queueMax: Math.round(clamp(num(c.queueMax, 5), 1, 20)),
     mergeWindowMs: Math.max(0, Math.round(num(c.mergeWindowMs, 3000))),
@@ -549,18 +551,23 @@ function argvOfScriptHost(o) {
   if (o.speak) argv.push('-Speak', psSafe(o.speak))
   if (o.resultPath) argv.push('-ResultPath', o.resultPath)
   if (o.buttonsEnabled === false) argv.push('-NoButtons')
-  if (Array.isArray(o.pickTimes) && o.pickTimes.length > 0) {
-    argv.push('-Choices', o.pickTimes.map((item) => item.label).join('|'), '-ChoicesAreTimes')
+  const picks = splitPickTimes(o.pickTimes, o.pickShortMinutes)
+  if (picks.short.length > 0) {
+    const shortest = Math.min(...picks.short.map((item) => item.minutes))
+    argv.push('-SnoozeMinutes', String(Math.max(1, Math.round(shortest))))
+  } else {
+    argv.push('-SnoozeMinutes', String(o.snoozeMinutes))
   }
-  else argv.push('-SnoozeMinutes', String(o.snoozeMinutes))
+  if (picks.long.length > 0) {
+    argv.push('-Choices', picks.long.map((item) => item.label).join('|'), '-ChoicesAreTimes')
+  }
   if (o.compact) argv.push('-Compact')
   if (o.autoCompact) argv.push('-AutoCompact')
   if (o.queueLeft > 0) argv.push('-QueueLeft', String(o.queueLeft))
   if (o.openUrl) argv.push('-OpenUrl', String(o.openUrl))
   if (o.replyEnabled) argv.push('-Reply')
   if (o.customButtons) argv.push('-CustomButtons', String(o.customButtons))
-  const hasPickTimes = Array.isArray(o.pickTimes) && o.pickTimes.length > 0
-  if (o.choices && !hasPickTimes) argv.push('-Choices', String(o.choices))
+  if (o.choices && picks.long.length === 0) argv.push('-Choices', String(o.choices))
   if (o.allowOther && o.choices) argv.push('-ChoicesOther')
   if (o.focusAssistMute) argv.push('-RespectFocus')
   return argv
@@ -668,6 +675,21 @@ export function parsePickTimes(input) {
     if (out.length >= 3) break
   }
   return out
+}
+
+// 0.38：短延迟并进「稍后提醒」。<= shortMinutes 的选项不再单独占按钮，只留下长延迟。
+export function splitPickTimes(list, shortMinutes = 60) {
+  const limit = Math.max(1, Math.round(Number(shortMinutes) || 60))
+  const short = []
+  const long = []
+  for (const item of Array.isArray(list) ? list : []) {
+    if (!item || typeof item.label !== 'string') continue
+    const minutes = Number(item.minutes)
+    if (!isFinite(minutes) || minutes <= 0) continue
+    if (minutes <= limit) short.push(item)
+    else long.push(item)
+  }
+  return { short, long }
 }
 
 export function parseDays(text) {
@@ -935,6 +957,7 @@ async function showItem(item) {
     allowOther: item.allowOther === true,
     focusAssistMute: settings.focusAssistMute,
     snoozeMinutes: settings.snoozeMinutes,
+    pickShortMinutes: settings.pickShortMinutes,
     autoCompact: settings.compactOnFullscreen,
     queueLeft,
   })

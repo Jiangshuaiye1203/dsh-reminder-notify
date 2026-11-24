@@ -3,7 +3,7 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { mobileProxyPathOk, httpsLinkOf, mobileBarsOf, mobileCsvOf, mobileSettingsPatch, mobileViewOf, attachmentSummaryOf, mobileAttachmentsOf, uploadNameFor, condStateAfter, choicePromptText, choicesArgOf, normalizeChoices, resetChoiceSeen, unreadChoices, customButtonsOf, customButtonsSpec, escapeHtml, mobileLinkOf, mobilePageOf, phonePromptText, repliesOf, resetPhoneSeen, unreadPhoneReplies, digestDue, digestShownToday, digestMessage, doctorReport, evaluateConditions, historyStats, inQuietHours, nextRunAfter, parseClock, parseCustomButtons, parseEvery, pushPayload, quietEndAt, todayKey, toastArgsOf, feedbackEntryOf, issueUrlOf, envSummaryOf, statsOf, feedbackPathOf, backupNow, listBackups, readBackup, backupDirOf, parseDays, daysLabelOf, nextRunWithDays, resolvedHostMode, nativeNotifyArgs, mobileAccessAllowed, manifestOf, sanitizeLabel, parseRules, ruleMatches, dueRules, reminderMetrics, parsePickTimes } from '../index.js'
+import { mobileProxyPathOk, httpsLinkOf, mobileBarsOf, mobileCsvOf, mobileSettingsPatch, mobileViewOf, attachmentSummaryOf, mobileAttachmentsOf, uploadNameFor, condStateAfter, choicePromptText, choicesArgOf, normalizeChoices, resetChoiceSeen, unreadChoices, customButtonsOf, customButtonsSpec, escapeHtml, mobileLinkOf, mobilePageOf, phonePromptText, repliesOf, resetPhoneSeen, unreadPhoneReplies, digestDue, digestShownToday, digestMessage, doctorReport, evaluateConditions, historyStats, inQuietHours, nextRunAfter, parseClock, parseCustomButtons, parseEvery, pushPayload, quietEndAt, todayKey, toastArgsOf, feedbackEntryOf, issueUrlOf, envSummaryOf, statsOf, feedbackPathOf, backupNow, listBackups, readBackup, backupDirOf, parseDays, daysLabelOf, nextRunWithDays, resolvedHostMode, nativeNotifyArgs, mobileAccessAllowed, manifestOf, sanitizeLabel, parseRules, ruleMatches, dueRules, reminderMetrics, parsePickTimes, splitPickTimes } from '../index.js'
 
 let failed = 0
 function check(label, actual, expected) {
@@ -541,6 +541,15 @@ const expectClock = (() => {
 })()
 check('时间按钮：钟点按今天或明天算', Math.abs(clockPick.minutes - expectClock) <= 1, true)
 check('时间按钮：分钟数不小于 1', parsePickTimes(['0 分钟']).every((i) => i.minutes >= 1), true)
+
+// 0.38：短延迟并进「稍后提醒」，长延迟才占按钮
+const splitMix = splitPickTimes(parsePickTimes(['10 分钟', '明天 09:00']), 60)
+check('短延迟并进稍后：短的进 short', splitMix.short.map((i) => i.minutes), [10])
+check('短延迟并进稍后：长的留按钮', splitMix.long.map((i) => i.label), ['明天 09:00'])
+const splitAllShort = splitPickTimes(parsePickTimes(['1 分钟', '1 小时']), 60)
+check('阈值内全算短延迟', [splitAllShort.short.length, splitAllShort.long.length], [2, 0])
+check('阈值可调（阈值 5 分钟）', splitPickTimes(parsePickTimes(['10 分钟', '30 分钟']), 5).long.length, 2)
+check('空列表不出错', splitPickTimes(null, 60).long.length, 0)
 
 if (failed > 0) { console.log('\n' + failed + ' 项失败'); process.exit(1) }
 console.log('\n全部通过')
